@@ -23,6 +23,8 @@ export interface FractalConfig {
   rotation: THREE.Euler;
   minInteractiveIterations: number;
   maxInteractiveIterations: number;
+  minSettledIterations: number;
+  maxSettledIterations: number;
   parameters: {
     iterations: number;
     p1: number; // Generic parameter 1 (e.g. Power, Scale)
@@ -47,6 +49,8 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     rotation: new THREE.Euler(0, 0, 0),
     minInteractiveIterations: 8,
     maxInteractiveIterations: 32,
+    minSettledIterations: 32,
+    maxSettledIterations: 128,
     parameters: { iterations: 48, p1: 8.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
@@ -56,6 +60,8 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     rotation: new THREE.Euler(0.5, 0.5, 0),
     minInteractiveIterations: 3,
     maxInteractiveIterations: 8,
+    minSettledIterations: 8,
+    maxSettledIterations: 24,
     parameters: { iterations: 6, p1: 5.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
@@ -65,6 +71,8 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     rotation: new THREE.Euler(0, 0, 0),
     minInteractiveIterations: 32,
     maxInteractiveIterations: 128,
+    minSettledIterations: 128,
+    maxSettledIterations: 512,
     parameters: { iterations: 128, p1: 0, p2: -0.8, p3: 0.156 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   },
@@ -74,6 +82,8 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     rotation: new THREE.Euler(0.4, 0.8, 0),
     minInteractiveIterations: 10,
     maxInteractiveIterations: 40,
+    minSettledIterations: 40,
+    maxSettledIterations: 160,
     parameters: { iterations: 40, p1: 2.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
@@ -83,6 +93,8 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     rotation: new THREE.Euler(0.2, 0.4, 0),
     minInteractiveIterations: 6,
     maxInteractiveIterations: 24,
+    minSettledIterations: 24,
+    maxSettledIterations: 96,
     parameters: { iterations: 32, p1: 2.0, p2: 0.135, p3: 1.0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
@@ -92,6 +104,8 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     rotation: new THREE.Euler(0.5, 0.5, 0.5),
     minInteractiveIterations: 3,
     maxInteractiveIterations: 10,
+    minSettledIterations: 10,
+    maxSettledIterations: 40,
     parameters: { iterations: 10, p1: 1.0, p2: 0, p3: 0 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   }

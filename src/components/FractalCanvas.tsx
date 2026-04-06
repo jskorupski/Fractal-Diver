@@ -33,7 +33,8 @@ interface FractalMeshProps {
   rotation: THREE.Quaternion;
   isInteracting: boolean;
   interactionType: number;
-  adaptiveIterations: number;
+  adaptiveIterations: number;        // Max iterations during interaction (targets 30fps)
+  adaptiveSettledIterations: number; // Max iterations when settled (targets 15fps)
   onFrameTime?: (delta: number) => void;
   settleTime: number;
   isVisible: boolean;
@@ -62,6 +63,7 @@ function FractalMesh({
   isInteracting,
   interactionType,
   adaptiveIterations,
+  adaptiveSettledIterations,
   onFrameTime,
   settleTime,
   isVisible,
@@ -89,7 +91,8 @@ function FractalMesh({
     uRot: uniform(new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current))),
     uInteracting: uniform(isInteracting ? 1.0 : 0.0),
     uInteractionType: uniform(Math.floor(interactionType)),
-    uAdaptiveIterations: uniform(adaptiveIterations),
+    uAdaptiveIterations: uniform(adaptiveIterations),               // Uniform for interactive iteration limit
+    uAdaptiveSettledIterations: uniform(adaptiveSettledIterations), // Uniform for settled iteration limit
     uSettleTime: uniform(settleTime),
     uSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
     uSlicerOffset: uniform(slicerOffset),
@@ -102,7 +105,7 @@ function FractalMesh({
     if (isVisible) {
       invalidate();
     }
-  }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, adaptiveIterations, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
+  }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, adaptiveIterations, adaptiveSettledIterations, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
 
   useEffect(() => {
     uniforms.uRes.value.set(size.width, size.height);
@@ -111,7 +114,7 @@ function FractalMesh({
 
   useFrame((_state, delta) => {
     // Report frame time for adaptive iterations
-    if (isInteracting && onFrameTime) {
+    if (onFrameTime) {
       onFrameTime(delta);
     }
 
@@ -133,6 +136,7 @@ function FractalMesh({
     uniforms.uInteracting.value = isInteracting ? 1.0 : 0.0;
     uniforms.uInteractionType.value = Math.floor(interactionType);
     uniforms.uAdaptiveIterations.value = adaptiveIterations;
+    uniforms.uAdaptiveSettledIterations.value = adaptiveSettledIterations;
     uniforms.uSettleTime.value = settleTime;
     uniforms.uZoom.value = smoothedZoom.current;
     uniforms.uOff.value.copy(smoothedOffset.current);
@@ -166,6 +170,7 @@ function FractalMesh({
       uInteracting: uniforms.uInteracting,
       uInteractionType: int(uniforms.uInteractionType),
       uAdaptiveIterations: uniforms.uAdaptiveIterations,
+      uAdaptiveSettledIterations: uniforms.uAdaptiveSettledIterations,
       uSettleTime: uniforms.uSettleTime,
       uSlicerEnabled: uniforms.uSlicerEnabled,
       uSlicerOffset: uniforms.uSlicerOffset,
@@ -200,7 +205,8 @@ interface FractalCanvasProps {
   };
   isInteracting: boolean;
   interactionType: number;
-  adaptiveIterations: number;
+  adaptiveIterations: number;        // Max iterations during interaction (targets 30fps)
+  adaptiveSettledIterations: number; // Max iterations when settled (targets 15fps)
   onFrameTime?: (delta: number) => void;
   settleTime: number;
   isVisible: boolean;

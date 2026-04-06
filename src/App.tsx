@@ -66,6 +66,8 @@ export default function App() {
   // Interaction and visibility states
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
   const [interactionType, setInteractionType] = useState<number>(0); // 0: none, 1: pan/rotate, 2: zoom
+  
+  // Adaptive iteration counts for interactive mode (targets 30fps)
   const [adaptiveIterations, setAdaptiveIterations] = useState<Record<number, number>>(() => {
     const initial: Record<number, number> = {};
     Object.entries(FRACTAL_CONFIGS).forEach(([key, config]) => {
@@ -73,7 +75,19 @@ export default function App() {
     });
     return initial;
   });
+
+  // Adaptive iteration counts for settled mode (targets 15fps)
+  const [adaptiveSettledIterations, setAdaptiveSettledIterations] = useState<Record<number, number>>(() => {
+    const initial: Record<number, number> = {};
+    Object.entries(FRACTAL_CONFIGS).forEach(([key, config]) => {
+      initial[parseInt(key)] = config.minSettledIterations;
+    });
+    return initial;
+  });
+  
+  // Throttling refs for state updates
   const lastAdaptiveUpdateRef = useRef<number>(0);
+  const lastSettledAdaptiveUpdateRef = useRef<number>(0);
 
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -454,39 +468,60 @@ export default function App() {
 
   /**
    * Callback for frame timings from the renderer.
-   * Used to adaptively adjust iteration counts to target 30fps.
+   * Used to adaptively adjust iteration counts to target 30fps (interactive) or 15fps (settled).
+   * This ensures that the app remains performant on a wide range of devices.
    */
   const handleFrameTime = useCallback((delta: number) => {
-    if (!isInteracting) return;
-    
     const now = performance.now();
-    const targetFrameTime = 1 / 30; // 33.3ms
     const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
-    
-    setAdaptiveIterations(prev => {
-      const current = prev[fractalType];
-      let nextIter = current;
-      
-      // Adjust based on frame time
-      if (delta > targetFrameTime * 1.1) {
-        // Too slow, decrease iterations
-        nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 0.5);
-      } else if (delta < targetFrameTime * 0.9) {
-        // Fast enough, increase iterations
-        nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.2);
-      }
-      
-      if (nextIter === current) return prev;
-      
-      // Throttle state updates to ~10fps to avoid React overhead
-      if (now - lastAdaptiveUpdateRef.current < 100) return prev;
-      lastAdaptiveUpdateRef.current = now;
-      
-      return {
-        ...prev,
-        [fractalType]: nextIter
-      };
-    });
+
+    if (isInteracting) {
+      // Interactive mode: target 30fps for smooth navigation
+      const targetFrameTime = 1 / 30; // 33.3ms
+      setAdaptiveIterations(prev => {
+        const current = prev[fractalType];
+        let nextIter = current;
+        
+        if (delta > targetFrameTime * 1.1) {
+          // Too slow, decrease interactive iterations
+          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 0.5);
+        } else if (delta < targetFrameTime * 0.9) {
+          // Fast enough, increase interactive iterations
+          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.2);
+        }
+        
+        if (nextIter === current) return prev;
+        
+        // Throttle state updates to ~10fps to avoid React overhead
+        if (now - lastAdaptiveUpdateRef.current < 100) return prev;
+        lastAdaptiveUpdateRef.current = now;
+        
+        return { ...prev, [fractalType]: nextIter };
+      });
+    } else {
+      // Settled mode: target 15fps for higher detail when static
+      const targetFrameTime = 1 / 15; // 66.6ms
+      setAdaptiveSettledIterations(prev => {
+        const current = prev[fractalType];
+        let nextIter = current;
+        
+        if (delta > targetFrameTime * 1.1) {
+          // Too slow, decrease settled iterations
+          nextIter = Math.max(currentConfig.minSettledIterations, nextIter - 1.0);
+        } else if (delta < targetFrameTime * 0.9) {
+          // Fast enough, increase settled iterations
+          nextIter = Math.min(currentConfig.maxSettledIterations, nextIter + 0.5);
+        }
+        
+        if (nextIter === current) return prev;
+        
+        // Throttle state updates to ~5fps for settled mode as it's less critical
+        if (now - lastSettledAdaptiveUpdateRef.current < 200) return prev;
+        lastSettledAdaptiveUpdateRef.current = now;
+        
+        return { ...prev, [fractalType]: nextIter };
+      });
+    }
   }, [isInteracting, fractalType]);
 
   // --- Render ---
@@ -525,6 +560,7 @@ export default function App() {
         isInteracting={isInteracting}
         interactionType={interactionType}
         adaptiveIterations={adaptiveIterations[fractalType]}
+        adaptiveSettledIterations={adaptiveSettledIterations[fractalType]}
         onFrameTime={handleFrameTime}
         settleTime={settleTime}
         isVisible={isVisible}
@@ -577,6 +613,7 @@ export default function App() {
           {/* Slicer Toggle */}
           <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 border-l border-cyan-500/20 h-11 shrink-0">
             <div 
+              data-testid="slicer-toggle"
               onClick={() => {
                 const newState = !slicer.enabled;
                 updateCurrentView({ slicer: { enabled: newState } });
@@ -619,6 +656,7 @@ export default function App() {
                 </div>
                 <input 
                   type="range" 
+                  aria-label="Iterations"
                   min="1" 
                   max="128" 
                   step="1"

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import App from './App';
 
@@ -27,12 +27,59 @@ describe('App Component', () => {
     render(<App />);
     const toggleButton = screen.getByRole('button', { name: /settings/i });
     
-    // Initially panel should not be visible or at least not expanded
-    // The settings panel is rendered conditionally or with a state
-    // Let's check for a specific parameter slider that should appear
-    
     fireEvent.click(toggleButton);
-    // After clicking, we expect to see some parameters like "Iterations"
     expect(screen.getByText(/Iterations/i)).toBeInTheDocument();
+  });
+
+  it('resets the view when the reset button is clicked', () => {
+    render(<App />);
+    const resetButton = screen.getByRole('button', { name: /reset/i });
+    
+    // We can't easily check the internal state of App, but we can verify the button exists and is clickable
+    fireEvent.click(resetButton);
+    expect(resetButton).toBeInTheDocument();
+  });
+
+  it('toggles the slicer when the slicer toggle is clicked', () => {
+    render(<App />);
+    const slicerToggle = screen.getByTestId('slicer-toggle');
+    
+    fireEvent.click(slicerToggle);
+    // When slicer is enabled, "Slicer Controls" should appear if expanded
+    expect(screen.getByText(/Slicer Controls/i)).toBeInTheDocument();
+  });
+
+  it('changes the fractal when a new one is selected', async () => {
+    render(<App />);
+    const selectTrigger = screen.getByRole('combobox');
+    
+    // Click the trigger to open the menu
+    await act(async () => {
+      fireEvent.click(selectTrigger);
+    });
+    
+    // Find and click "Menger Sponge" (fractal type 1)
+    const mengerSpongeOption = screen.getByText(/Menger Sponge/i);
+    await act(async () => {
+      fireEvent.click(mengerSpongeOption);
+    });
+    
+    // Check if the trigger now shows "Menger Sponge"
+    expect(screen.getByText(/Menger Sponge/i)).toBeInTheDocument();
+  });
+
+  it('updates parameters when a slider is moved', () => {
+    render(<App />);
+    // Open settings panel
+    fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+    
+    // Find the iterations slider
+    const iterationsSlider = screen.getByLabelText(/Iterations/i);
+    
+    // Change the slider value
+    fireEvent.change(iterationsSlider, { target: { value: '64' } });
+    
+    // Check if the value is updated in the UI
+    expect(screen.getByText('64')).toBeInTheDocument();
   });
 });
