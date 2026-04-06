@@ -48,9 +48,9 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     zoom: 1.2, 
     offset: [0, 0, 0], 
     rotation: new THREE.Euler(0, 0, 0),
-    minInteractiveIterations: 8,
+    minInteractiveIterations: 4,
     maxInteractiveIterations: 32,
-    minSettledIterations: 32,
+    minSettledIterations: 16,
     maxSettledIterations: 128,
     parameters: { qualityOffset: 0, qualityStep: 4, p1: 8.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }

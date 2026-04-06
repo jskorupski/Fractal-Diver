@@ -56,7 +56,10 @@ export default function App() {
 
   // Parameters panel state
   const [paramsEnabled, setParamsEnabled] = useState<boolean>(false);
-  const [slicerExpanded, setSlicerExpanded] = useState<boolean>(true);
+  const [slicerExpanded, setSlicerExpanded] = useState<boolean>(() => {
+    const config = FRACTAL_CONFIGS["0"];
+    return !config?.slicer.enabled;
+  });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   
   // Refs for tracking interaction state across frames
@@ -608,7 +611,16 @@ export default function App() {
           {/* Fractal Selection Menu */}
           <Select 
             value={fractalType.toString()} 
-            onValueChange={(value) => setFractalType(parseInt(value as string, 10))}
+            onValueChange={(value) => {
+              const nextType = parseInt(value as string, 10);
+              setFractalType(nextType);
+              const config = FRACTAL_CONFIGS[nextType.toString()];
+              if (config?.slicer.enabled) {
+                setSlicerExpanded(false);
+              } else {
+                setSlicerExpanded(true);
+              }
+            }}
           >
             <SelectTrigger className="w-[140px] sm:w-[160px] bg-transparent text-cyan-400 border-none focus:ring-0 font-mono uppercase tracking-wider text-[10px] sm:text-[11px] h-11 hover:text-cyan-300 transition-colors px-3 sm:px-4">
               <SelectValue>
