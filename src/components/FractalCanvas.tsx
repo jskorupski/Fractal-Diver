@@ -29,10 +29,12 @@ extend({ Mesh, PlaneGeometry });
 interface FractalMeshProps {
   fractalType: number;
   zoom: number;
-  offset: [number, number];
-  rotation: THREE.Euler;
+  offset: THREE.Vector3;
+  rotation: THREE.Quaternion;
   isInteracting: boolean;
   interactionType: number;
+  adaptiveIterations: number;
+  onFrameTime?: (delta: number) => void;
   settleTime: number;
   isVisible: boolean;
   slicerEnabled: boolean;
@@ -59,6 +61,8 @@ function FractalMesh({
   rotation, 
   isInteracting,
   interactionType,
+  adaptiveIterations,
+  onFrameTime,
   settleTime,
   isVisible,
   slicerEnabled,
@@ -71,20 +75,21 @@ function FractalMesh({
   
   // Refs for smoothed values
   const smoothedZoom = useRef(zoom);
-  const smoothedOffset = useRef(new THREE.Vector2(offset[0], offset[1]));
-  const smoothedRotation = useRef(new THREE.Quaternion().setFromEuler(rotation));
+  const smoothedOffset = useRef(offset.clone());
+  const smoothedRotation = useRef(rotation.clone());
   
   // Target rotation as quaternion
-  const targetRotation = useMemo(() => new THREE.Quaternion().setFromEuler(rotation), [rotation]);
+  const targetRotation = useMemo(() => rotation.clone(), [rotation]);
 
   const uniforms = useMemo(() => ({
     uRes: uniform(new THREE.Vector2(size.width, size.height)),
     uType: uniform(Math.floor(fractalType)),
     uZoom: uniform(zoom),
-    uOff: uniform(new THREE.Vector2(offset[0], offset[1])),
+    uOff: uniform(offset.clone()),
     uRot: uniform(new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current))),
     uInteracting: uniform(isInteracting ? 1.0 : 0.0),
     uInteractionType: uniform(Math.floor(interactionType)),
+    uAdaptiveIterations: uniform(adaptiveIterations),
     uSettleTime: uniform(settleTime),
     uSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
     uSlicerOffset: uniform(slicerOffset),
@@ -97,7 +102,7 @@ function FractalMesh({
     if (isVisible) {
       invalidate();
     }
-  }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
+  }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, adaptiveIterations, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
 
   useEffect(() => {
     uniforms.uRes.value.set(size.width, size.height);
@@ -105,6 +110,11 @@ function FractalMesh({
   }, [size, uniforms, invalidate]);
 
   useFrame((_state, delta) => {
+    // Report frame time for adaptive iterations
+    if (isInteracting && onFrameTime) {
+      onFrameTime(delta);
+    }
+
     // Smoothing factor (higher = faster response)
     // We use a frame-rate independent lerp factor
     const lerpFactor = 1.0 - Math.exp(-12 * delta);
@@ -113,7 +123,7 @@ function FractalMesh({
     smoothedZoom.current = THREE.MathUtils.lerp(smoothedZoom.current, zoom, lerpFactor);
     
     // Offset smoothing
-    smoothedOffset.current.lerp(new THREE.Vector2(offset[0], offset[1]), lerpFactor);
+    smoothedOffset.current.lerp(offset, lerpFactor);
     
     // Rotation smoothing (SLERP)
     smoothedRotation.current.slerp(targetRotation, lerpFactor);
@@ -122,6 +132,7 @@ function FractalMesh({
     uniforms.uType.value = Math.floor(fractalType);
     uniforms.uInteracting.value = isInteracting ? 1.0 : 0.0;
     uniforms.uInteractionType.value = Math.floor(interactionType);
+    uniforms.uAdaptiveIterations.value = adaptiveIterations;
     uniforms.uSettleTime.value = settleTime;
     uniforms.uZoom.value = smoothedZoom.current;
     uniforms.uOff.value.copy(smoothedOffset.current);
@@ -135,7 +146,7 @@ function FractalMesh({
     // If we are still smoothing, keep invalidating
     const isStillSmoothing = 
       Math.abs(smoothedZoom.current - zoom) > 0.0001 ||
-      smoothedOffset.current.distanceTo(new THREE.Vector2(offset[0], offset[1])) > 0.0001 ||
+      smoothedOffset.current.distanceTo(offset) > 0.0001 ||
       smoothedRotation.current.angleTo(targetRotation) > 0.0001;
       
     if (isStillSmoothing || isInteracting) {
@@ -154,6 +165,7 @@ function FractalMesh({
       uRot: uniforms.uRot,
       uInteracting: uniforms.uInteracting,
       uInteractionType: int(uniforms.uInteractionType),
+      uAdaptiveIterations: uniforms.uAdaptiveIterations,
       uSettleTime: uniforms.uSettleTime,
       uSlicerEnabled: uniforms.uSlicerEnabled,
       uSlicerOffset: uniforms.uSlicerOffset,
@@ -178,8 +190,8 @@ function FractalMesh({
 interface FractalCanvasProps {
   fractalType: number;
   zoom: number;
-  offset: [number, number];
-  rotation: THREE.Euler;
+  offset: THREE.Vector3;
+  rotation: THREE.Quaternion;
   parameters: {
     iterations: number;
     p1: number;
@@ -188,6 +200,8 @@ interface FractalCanvasProps {
   };
   isInteracting: boolean;
   interactionType: number;
+  adaptiveIterations: number;
+  onFrameTime?: (delta: number) => void;
   settleTime: number;
   isVisible: boolean;
   slicerEnabled: boolean;
@@ -208,6 +222,7 @@ interface FractalCanvasProps {
  */
 export default function FractalCanvas(props: FractalCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<WebGPURenderer | null>(null);
   const [root, setRoot] = useState<any>(null);
 
   useEffect(() => {
@@ -215,6 +230,9 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     
     const canvas = canvasRef.current;
     const r = new WebGPURenderer({ canvas, antialias: false });
+    r.setPixelRatio(window.devicePixelRatio);
+    r.setSize(canvas.clientWidth, canvas.clientHeight);
+    rendererRef.current = r;
     
     let active = true;
     r.init().then(() => {
@@ -247,8 +265,16 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     if (root && canvasRef.current) {
       const canvas = canvasRef.current;
       const handleResize = () => {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        
+        // Update renderer size
+        if (rendererRef.current) {
+          rendererRef.current.setSize(width, height);
+        }
+
         root.configure({
-          size: { width: canvas.clientWidth, height: canvas.clientHeight, top: 0, left: 0 }
+          size: { width, height, top: 0, left: 0 }
         });
       };
       window.addEventListener('resize', handleResize);

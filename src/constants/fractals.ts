@@ -19,8 +19,10 @@ export const FRACTAL_NAMES: Record<string, string> = {
  */
 export interface FractalConfig {
   zoom: number;
-  offset: [number, number];
+  offset: [number, number, number];
   rotation: THREE.Euler;
+  minInteractiveIterations: number;
+  maxInteractiveIterations: number;
   parameters: {
     iterations: number;
     p1: number; // Generic parameter 1 (e.g. Power, Scale)
@@ -41,43 +43,55 @@ export interface FractalConfig {
 export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
   "0": { // Mandelbulb
     zoom: 1.2, 
-    offset: [0, 0], 
+    offset: [0, 0, 0], 
     rotation: new THREE.Euler(0, 0, 0),
+    minInteractiveIterations: 8,
+    maxInteractiveIterations: 32,
     parameters: { iterations: 48, p1: 8.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "1": { // Menger Sponge
     zoom: 1.0, 
-    offset: [0, 0], 
+    offset: [0, 0, 0], 
     rotation: new THREE.Euler(0.5, 0.5, 0),
+    minInteractiveIterations: 3,
+    maxInteractiveIterations: 8,
     parameters: { iterations: 6, p1: 5.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "2": { // Julia Set
     zoom: 1.2, 
-    offset: [0, 0], 
+    offset: [0, 0, 0], 
     rotation: new THREE.Euler(0, 0, 0),
+    minInteractiveIterations: 32,
+    maxInteractiveIterations: 128,
     parameters: { iterations: 128, p1: 0, p2: -0.8, p3: 0.156 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   },
   "3": { // Sierpinski Tetrahedron
     zoom: 1.0, 
-    offset: [0, 0], 
+    offset: [0, 0, 0], 
     rotation: new THREE.Euler(0.4, 0.8, 0),
+    minInteractiveIterations: 10,
+    maxInteractiveIterations: 40,
     parameters: { iterations: 40, p1: 2.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "4": { // Mandelbox
     zoom: 0.15, 
-    offset: [0, 0], 
+    offset: [0, 0, 0], 
     rotation: new THREE.Euler(0.2, 0.4, 0),
+    minInteractiveIterations: 6,
+    maxInteractiveIterations: 24,
     parameters: { iterations: 32, p1: 2.0, p2: 0.135, p3: 1.0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "5": { // Apollonian
     zoom: 1.5, 
-    offset: [0, 0], 
+    offset: [0, 0, 0], 
     rotation: new THREE.Euler(0.5, 0.5, 0.5),
+    minInteractiveIterations: 3,
+    maxInteractiveIterations: 10,
     parameters: { iterations: 10, p1: 1.0, p2: 0, p3: 0 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   }

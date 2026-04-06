@@ -26,8 +26,8 @@ export default function App() {
   // Per-fractal view states to store camera parameters separately
   const [fractalViews, setFractalViews] = useState<Record<number, {
     zoom: number;
-    offset: [number, number];
-    rotation: THREE.Euler;
+    offset: THREE.Vector3;
+    rotation: THREE.Quaternion;
     parameters: {
       iterations: number;
       p1: number;
@@ -44,8 +44,8 @@ export default function App() {
     Object.entries(FRACTAL_CONFIGS).forEach(([key, config]) => {
       initial[parseInt(key)] = {
         zoom: config.zoom,
-        offset: [...config.offset],
-        rotation: config.rotation.clone(),
+        offset: new THREE.Vector3(...config.offset),
+        rotation: new THREE.Quaternion().setFromEuler(config.rotation),
         parameters: { ...config.parameters },
         slicer: { ...config.slicer }
       };
@@ -66,6 +66,15 @@ export default function App() {
   // Interaction and visibility states
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
   const [interactionType, setInteractionType] = useState<number>(0); // 0: none, 1: pan/rotate, 2: zoom
+  const [adaptiveIterations, setAdaptiveIterations] = useState<Record<number, number>>(() => {
+    const initial: Record<number, number> = {};
+    Object.entries(FRACTAL_CONFIGS).forEach(([key, config]) => {
+      initial[parseInt(key)] = config.minInteractiveIterations;
+    });
+    return initial;
+  });
+  const lastAdaptiveUpdateRef = useRef<number>(0);
+
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
   
@@ -83,8 +92,8 @@ export default function App() {
    */
   const updateCurrentView = useCallback((updates: Partial<{ 
     zoom: number; 
-    offset: [number, number]; 
-    rotation: THREE.Euler;
+    offset: THREE.Vector3; 
+    rotation: THREE.Quaternion;
     parameters: Partial<{ iterations: number; p1: number; p2: number; p3: number }>;
     slicer: Partial<{ enabled: boolean; offset: number; axis: number }>;
   }>) => {
@@ -114,8 +123,8 @@ export default function App() {
     if (config) {
       updateCurrentView({
         zoom: config.zoom,
-        offset: [...config.offset],
-        rotation: config.rotation.clone(),
+        offset: new THREE.Vector3(...config.offset),
+        rotation: new THREE.Quaternion().setFromEuler(config.rotation),
         parameters: { ...config.parameters },
         slicer: { ...config.slicer }
       });
@@ -135,8 +144,8 @@ export default function App() {
     if (config) {
       updateCurrentView({
         zoom: config.zoom,
-        offset: [...config.offset],
-        rotation: config.rotation.clone(),
+        offset: new THREE.Vector3(...config.offset),
+        rotation: new THREE.Quaternion().setFromEuler(config.rotation),
         parameters: { ...config.parameters },
         slicer: { ...config.slicer }
       });
@@ -152,11 +161,18 @@ export default function App() {
       setIsVisible(document.visibilityState === 'visible');
     };
 
+    const handleResize = () => {
+      resetView();
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('resize', handleResize);
+    
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('resize', handleResize);
     };
-  }, []);
+  }, [resetView]);
 
   /**
    * Effect: Handle settle timer.
@@ -165,22 +181,23 @@ export default function App() {
    */
   useEffect(() => {
     if (!isVisible) return;
+    
+    // Only run the timer if we are interacting or not yet settled
+    if (settleTime >= 1.0 && !isInteracting) return;
 
-    let frame: number;
-    const update = () => {
-      if (!isInteracting) {
+    const interval = setInterval(() => {
+      if (isInteracting) {
+        setSettleTime(0);
+      } else {
         setSettleTime((prev) => {
-          if (prev >= 1.0) return 1.0; // Stop updating once settled
+          if (prev >= 1.0) return 1.0;
           return Math.min(1.0, prev + 0.02);
         });
-      } else {
-        setSettleTime(0);
       }
-      frame = requestAnimationFrame(update);
-    };
-    frame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frame);
-  }, [isInteracting, isVisible]);
+    }, 16); // ~60fps target
+
+    return () => clearInterval(interval);
+  }, [isInteracting, isVisible, settleTime >= 1.0]);
 
   /**
    * Effect: Handle mouse wheel zoom events.
@@ -287,17 +304,20 @@ export default function App() {
         if (e.shiftKey) {
           // Shift + Drag: Panning
           // Panning sensitivity scales inversely with zoom relative to the fractal's default scale.
-          // This maintains a constant "perceived" speed on screen.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
           const panSensitivity = 0.0012 * (defaultConfig.zoom / current.zoom);
+          
+          // Calculate camera-relative right and up vectors
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
+          const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
+          
+          const deltaPan = right.multiplyScalar(-dx * panSensitivity).add(up.multiplyScalar(dy * panSensitivity));
+          
           return {
             ...prev,
             [fractalType]: {
               ...current,
-              offset: [
-                current.offset[0] - dx * panSensitivity,
-                current.offset[1] + dy * panSensitivity
-              ]
+              offset: current.offset.clone().add(deltaPan)
             }
           };
         } else {
@@ -305,15 +325,19 @@ export default function App() {
           // Rotation sensitivity also scales with zoom to allow for finer control at high zoom levels.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
           const rotSensitivity = 0.003 * (defaultConfig.zoom / current.zoom);
+          
+          // Calculate camera-relative rotation
+          const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
+          const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity);
+          
+          // Apply rotations: Y is applied globally (turntable), X is applied locally
+          const nextRotation = current.rotation.clone().multiply(deltaRotX).premultiply(deltaRotY);
+          
           return {
             ...prev,
             [fractalType]: {
               ...current,
-              rotation: new THREE.Euler(
-                current.rotation.x + dy * rotSensitivity,
-                current.rotation.y + dx * rotSensitivity,
-                current.rotation.z
-              )
+              rotation: nextRotation
             }
           };
         }
@@ -347,15 +371,16 @@ export default function App() {
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
         const rotSensitivity = 0.003 * (defaultConfig.zoom / current.zoom);
+        
+        const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
+        const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity);
+        const nextRotation = current.rotation.clone().multiply(deltaRotX).premultiply(deltaRotY);
+        
         return {
           ...prev,
           [fractalType]: {
             ...current,
-            rotation: new THREE.Euler(
-              current.rotation.x + dy * rotSensitivity,
-              current.rotation.y + dx * rotSensitivity,
-              current.rotation.z
-            )
+            rotation: nextRotation
           }
         };
       });
@@ -393,14 +418,16 @@ export default function App() {
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
         const panSensitivity = 0.0012 * (defaultConfig.zoom / current.zoom);
+        
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
+        const deltaPan = right.multiplyScalar(-dx * panSensitivity).add(up.multiplyScalar(dy * panSensitivity));
+        
         return {
           ...prev,
           [fractalType]: {
             ...current,
-            offset: [
-              current.offset[0] - dx * panSensitivity,
-              current.offset[1] + dy * panSensitivity
-            ]
+            offset: current.offset.clone().add(deltaPan)
           }
         };
       });
@@ -425,6 +452,43 @@ export default function App() {
     }
   };
 
+  /**
+   * Callback for frame timings from the renderer.
+   * Used to adaptively adjust iteration counts to target 30fps.
+   */
+  const handleFrameTime = useCallback((delta: number) => {
+    if (!isInteracting) return;
+    
+    const now = performance.now();
+    const targetFrameTime = 1 / 30; // 33.3ms
+    const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
+    
+    setAdaptiveIterations(prev => {
+      const current = prev[fractalType];
+      let nextIter = current;
+      
+      // Adjust based on frame time
+      if (delta > targetFrameTime * 1.1) {
+        // Too slow, decrease iterations
+        nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 0.5);
+      } else if (delta < targetFrameTime * 0.9) {
+        // Fast enough, increase iterations
+        nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.2);
+      }
+      
+      if (nextIter === current) return prev;
+      
+      // Throttle state updates to ~10fps to avoid React overhead
+      if (now - lastAdaptiveUpdateRef.current < 100) return prev;
+      lastAdaptiveUpdateRef.current = now;
+      
+      return {
+        ...prev,
+        [fractalType]: nextIter
+      };
+    });
+  }, [isInteracting, fractalType]);
+
   // --- Render ---
 
   return (
@@ -433,8 +497,8 @@ export default function App() {
       ref={containerRef}
     >
       {/* Branding & Navigation Overlay */}
-      <div className="absolute top-8 left-8 z-10 flex flex-col gap-1.5 pointer-events-none">
-        <h1 className="text-cyan-400 font-mono font-bold uppercase tracking-[0.4em] text-sm sm:text-base drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
+      <div className="absolute top-4 left-4 sm:top-8 sm:left-8 z-10 flex flex-col gap-1.5 pointer-events-none">
+        <h1 className="text-cyan-400 font-mono font-bold uppercase tracking-[0.4em] text-xs sm:text-base drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
           Fractal Diver
         </h1>
         <div className="h-[1px] w-12 bg-cyan-500/50" />
@@ -460,6 +524,8 @@ export default function App() {
         parameters={parameters}
         isInteracting={isInteracting}
         interactionType={interactionType}
+        adaptiveIterations={adaptiveIterations[fractalType]}
+        onFrameTime={handleFrameTime}
         settleTime={settleTime}
         isVisible={isVisible}
         slicerEnabled={slicer.enabled}
@@ -475,10 +541,10 @@ export default function App() {
       />
 
       {/* UI Controls Overlay - Futuristic Styling */}
-      <div className={`absolute bottom-6 right-6 z-10 flex flex-col items-end gap-3 max-w-[95vw] transition-opacity duration-300 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+      <div className={`absolute bottom-4 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-10 flex flex-col items-end gap-3 max-w-full sm:max-w-[400px] transition-opacity duration-300 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
         
         {/* Main Controls Group */}
-        <div className="flex items-center gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.2)] overflow-x-auto no-scrollbar max-w-full">
+        <div className="flex items-center gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.2)] w-full sm:w-auto overflow-x-auto no-scrollbar">
           
           {/* Fractal Selection Menu */}
           <Select 
@@ -538,7 +604,7 @@ export default function App() {
 
         {/* Fractal Parameters Panel */}
         {paramsEnabled && (
-          <div className={`w-full sm:w-80 p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+          <div className={`w-full sm:w-80 p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity max-h-[40vh] sm:max-h-[60vh] overflow-y-auto ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
             <div className="flex flex-col gap-4 sm:gap-5">
               <div className="flex items-center gap-2 border-b border-cyan-500/20 pb-3">
                 <Settings2 className="w-3 h-3 text-cyan-500" />
@@ -644,7 +710,7 @@ export default function App() {
 
         {/* Advanced Slicer Panel */}
         {slicer.enabled && (
-          <div className={`w-full sm:w-72 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden transition-opacity ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+          <div className={`w-full sm:w-72 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden transition-opacity max-h-[30vh] sm:max-h-[40vh] overflow-y-auto ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
             <div 
               className="flex items-center justify-between px-5 py-3 border-b border-cyan-500/10 cursor-pointer hover:bg-cyan-500/5 transition-colors"
               onClick={() => setSlicerExpanded(!slicerExpanded)}

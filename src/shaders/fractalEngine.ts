@@ -13,10 +13,11 @@ export const fractalEngine = wgslFn(`
     uRes: vec2<f32>,
     uType: i32,
     uZoom: f32,
-    uOff: vec2<f32>,
+    uOff: vec3<f32>,
     uRot: mat3x3<f32>,
     uInteracting: f32,
     uInteractionType: i32,
+    uAdaptiveIterations: f32,
     uSettleTime: f32,
     uSlicerEnabled: f32,
     uSlicerOffset: f32,
@@ -33,7 +34,7 @@ export const fractalEngine = wgslFn(`
     let lodFactor = clamp(zoomLOD / 10.0, 0.0, 1.0);
     
     // Ray setup
-    let rayOrigin = uRot * vec3<f32>(0.0, 0.0, -5.0);
+    let rayOrigin = uRot * vec3<f32>(0.0, 0.0, -5.0) + uOff;
     let rayDirection = uRot * normalize(vec3<f32>(uvCoords, 1.5));
     
     var totalDist = 0.1;
@@ -53,7 +54,7 @@ export const fractalEngine = wgslFn(`
       let threshold = max(0.0000001, mix(0.0002, 0.000005, uSettleTime) * totalDist / uZoom);
       
       // Transform to global fractal space
-      let globalPoint = currentPoint / uZoom + vec3<f32>(uOff, 0.0);
+      let globalPoint = currentPoint / uZoom;
       
       // Sample distance
       let dist = getFractalDistance(
@@ -65,7 +66,8 @@ export const fractalEngine = wgslFn(`
         uSlicerEnabled, 
         uSlicerOffset, 
         uSlicerAxis,
-        uInteractionType
+        uInteractionType,
+        uAdaptiveIterations
       ) * uZoom;
       
       if (dist < threshold) {
@@ -86,17 +88,17 @@ export const fractalEngine = wgslFn(`
       let epsilon = 0.0005;
       
       // Normal calculation via finite difference
-      let pG = hitPoint / uZoom + vec3<f32>(uOff, 0.0);
-      let dC = getFractalDistance(pG, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType);
+      let pG = hitPoint / uZoom;
+      let dC = getFractalDistance(pG, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations);
       
-      let pX = (hitPoint + vec3<f32>(epsilon, 0.0, 0.0)) / uZoom + vec3<f32>(uOff, 0.0);
-      let dX = getFractalDistance(pX, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType);
+      let pX = (hitPoint + vec3<f32>(epsilon, 0.0, 0.0)) / uZoom;
+      let dX = getFractalDistance(pX, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations);
       
-      let pY = (hitPoint + vec3<f32>(0.0, epsilon, 0.0)) / uZoom + vec3<f32>(uOff, 0.0);
-      let dY = getFractalDistance(pY, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType);
+      let pY = (hitPoint + vec3<f32>(0.0, epsilon, 0.0)) / uZoom;
+      let dY = getFractalDistance(pY, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations);
       
-      let pZ = (hitPoint + vec3<f32>(0.0, 0.0, epsilon)) / uZoom + vec3<f32>(uOff, 0.0);
-      let dZ = getFractalDistance(pZ, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType);
+      let pZ = (hitPoint + vec3<f32>(0.0, 0.0, epsilon)) / uZoom;
+      let dZ = getFractalDistance(pZ, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations);
       
       let normal = normalize(vec3<f32>(dX, dY, dZ) - dC);
       
@@ -281,55 +283,35 @@ export const fractalEngine = wgslFn(`
     slicerEnabled: f32,
     slicerOffset: f32,
     slicerAxis: i32,
-    uInteractionType: i32
+    uInteractionType: i32,
+    uAdaptiveIterations: f32
   ) -> f32 {
     var dist: f32 = 10.0;
     let maxIterations = i32(params.x);
     
-    // Determine base interactive iterations based on interaction type
-    // 0: none, 1: pan/rotate, 2: zoom
-    
     if (fractalType == 0) {
-      let interactiveLimit = 12.0; // Increased from 4.0
       let settledLimit = f32(maxIterations) + zoomLOD * 0.5;
-      var baseIter = interactiveLimit;
-      if (uInteractionType == 2) { baseIter = mix(interactiveLimit, settledLimit, 0.4); }
-      let iter = i32(mix(baseIter, settledLimit, settleTime));
+      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
       dist = getMandelbulbDistance(point, params.y, iter);
     } else if (fractalType == 1) {
-      let interactiveLimit = 4.0;
       let settledLimit = f32(maxIterations) + zoomLOD * 0.3;
-      var baseIter = interactiveLimit;
-      if (uInteractionType == 2) { baseIter = mix(interactiveLimit, settledLimit, 0.4); }
-      let iter = i32(mix(baseIter, settledLimit, settleTime));
+      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
       dist = getMengerSpongeDistance(point, params.y, iter);
     } else if (fractalType == 2) {
-      let interactiveLimit = 48.0;
       let settledLimit = f32(maxIterations) + zoomLOD * 0.8;
-      var baseIter = interactiveLimit;
-      if (uInteractionType == 2) { baseIter = mix(interactiveLimit, settledLimit, 0.4); }
-      let iter = i32(mix(baseIter, settledLimit, settleTime));
+      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
       dist = getJuliaDistance(point, vec3<f32>(params.z, params.w, 0.1), iter);
     } else if (fractalType == 3) {
-      let interactiveLimit = 14.0;
       let settledLimit = f32(maxIterations) + zoomLOD;
-      var baseIter = interactiveLimit;
-      if (uInteractionType == 2) { baseIter = mix(interactiveLimit, settledLimit, 0.4); }
-      let iter = i32(mix(baseIter, settledLimit, settleTime));
+      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
       dist = getSierpinskiDistance(point, params.y, iter);
     } else if (fractalType == 4) {
-      let interactiveLimit = 8.0;
       let settledLimit = f32(maxIterations) + zoomLOD * 0.4;
-      var baseIter = interactiveLimit;
-      if (uInteractionType == 2) { baseIter = mix(interactiveLimit, settledLimit, 0.4); }
-      let iter = i32(mix(baseIter, settledLimit, settleTime));
+      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
       dist = getMandelboxDistance(point, params.y, params.z, params.w, iter);
     } else if (fractalType == 5) {
-      let interactiveLimit = 4.0;
       let settledLimit = f32(maxIterations) + zoomLOD * 0.5;
-      var baseIter = interactiveLimit;
-      if (uInteractionType == 2) { baseIter = mix(interactiveLimit, settledLimit, 0.4); }
-      let iter = i32(mix(baseIter, settledLimit, settleTime));
+      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
       dist = getApollonianDistance(point, params.y, iter);
     }
 
