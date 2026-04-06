@@ -408,12 +408,9 @@ export default function App() {
     >
       {/* Branding & Navigation Overlay */}
       <div className="absolute top-8 left-8 z-10 flex flex-col gap-1.5 pointer-events-none">
-        <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="Fractal Diver Logo" className="w-8 h-8 object-contain drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" referrerPolicy="no-referrer" />
-          <h1 className="text-cyan-400 font-mono font-bold uppercase tracking-[0.4em] text-sm sm:text-base drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
-            Fractal Diver
-          </h1>
-        </div>
+        <h1 className="text-cyan-400 font-mono font-bold uppercase tracking-[0.4em] text-sm sm:text-base drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
+          Fractal Diver
+        </h1>
         <div className="h-[1px] w-12 bg-cyan-500/50" />
         <div className="flex flex-col gap-0.5">
           <div className="text-cyan-500/40 text-[8px] sm:text-[9px] uppercase font-mono tracking-[0.2em]">
