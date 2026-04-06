@@ -65,8 +65,11 @@ export default function App() {
 
   // Interaction and visibility states
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
+  const [interactionType, setInteractionType] = useState<number>(0); // 0: none, 1: pan/rotate, 2: zoom
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
+  
+  const wheelTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get current view parameters
   const currentView = fractalViews[fractalType];
@@ -186,6 +189,23 @@ export default function App() {
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
+      
+      setIsInteracting(true);
+      setInteractionType(2); // Zoom
+      setSettleTime(0);
+
+      // Clear existing timeout
+      if (wheelTimeoutRef.current) {
+        clearTimeout(wheelTimeoutRef.current);
+      }
+
+      // Set timeout to end interaction
+      wheelTimeoutRef.current = setTimeout(() => {
+        setIsInteracting(false);
+        setInteractionType(0);
+        wheelTimeoutRef.current = null;
+      }, 200);
+
       const delta = -e.deltaY * 0.001;
       setFractalViews(prev => {
         const current = prev[fractalType];
@@ -222,14 +242,17 @@ export default function App() {
     setSettleTime(0);
     if (e.touches.length === 1) {
       // Single touch: track position for rotation
+      setInteractionType(1); // Pan/Rotate
       lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
       // Multi-touch: track distance for pinch-to-zoom
+      setInteractionType(2); // Zoom
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       lastPinchDistRef.current = Math.sqrt(dx * dx + dy * dy);
     } else if (e.touches.length === 3) {
       // Three-finger touch: track position for panning
+      setInteractionType(1); // Pan/Rotate
       // Use the average position of the three fingers
       const avgX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
       const avgY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
@@ -243,6 +266,7 @@ export default function App() {
    */
   const handleMouseDown = (e: ReactMouseEvent) => {
     setIsInteracting(true);
+    setInteractionType(1); // Pan/Rotate
     setSettleTime(0);
     lastTouchRef.current = { x: e.clientX, y: e.clientY };
   };
@@ -304,6 +328,7 @@ export default function App() {
    */
   const handleMouseUp = () => {
     setIsInteracting(false);
+    setInteractionType(0);
     lastTouchRef.current = null;
   };
 
@@ -391,6 +416,7 @@ export default function App() {
   const handleTouchEnd = (e: ReactTouchEvent) => {
     if (e.touches.length === 0) {
       setIsInteracting(false);
+      setInteractionType(0);
       lastTouchRef.current = null;
       lastPinchDistRef.current = null;
     } else {
@@ -433,6 +459,7 @@ export default function App() {
         rotation={rotation}
         parameters={parameters}
         isInteracting={isInteracting}
+        interactionType={interactionType}
         settleTime={settleTime}
         isVisible={isVisible}
         slicerEnabled={slicer.enabled}

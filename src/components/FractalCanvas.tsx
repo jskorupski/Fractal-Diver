@@ -32,6 +32,7 @@ interface FractalMeshProps {
   offset: [number, number];
   rotation: THREE.Euler;
   isInteracting: boolean;
+  interactionType: number;
   settleTime: number;
   isVisible: boolean;
   slicerEnabled: boolean;
@@ -57,6 +58,7 @@ function FractalMesh({
   offset, 
   rotation, 
   isInteracting,
+  interactionType,
   settleTime,
   isVisible,
   slicerEnabled,
@@ -82,6 +84,7 @@ function FractalMesh({
     uOff: uniform(new THREE.Vector2(offset[0], offset[1])),
     uRot: uniform(new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current))),
     uInteracting: uniform(isInteracting ? 1.0 : 0.0),
+    uInteractionType: uniform(Math.floor(interactionType)),
     uSettleTime: uniform(settleTime),
     uSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
     uSlicerOffset: uniform(slicerOffset),
@@ -94,7 +97,7 @@ function FractalMesh({
     if (isVisible) {
       invalidate();
     }
-  }, [fractalType, zoom, offset, rotation, isInteracting, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
+  }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
 
   useEffect(() => {
     uniforms.uRes.value.set(size.width, size.height);
@@ -118,6 +121,7 @@ function FractalMesh({
     // Update uniforms
     uniforms.uType.value = Math.floor(fractalType);
     uniforms.uInteracting.value = isInteracting ? 1.0 : 0.0;
+    uniforms.uInteractionType.value = Math.floor(interactionType);
     uniforms.uSettleTime.value = settleTime;
     uniforms.uZoom.value = smoothedZoom.current;
     uniforms.uOff.value.copy(smoothedOffset.current);
@@ -149,6 +153,7 @@ function FractalMesh({
       uOff: uniforms.uOff,
       uRot: uniforms.uRot,
       uInteracting: uniforms.uInteracting,
+      uInteractionType: int(uniforms.uInteractionType),
       uSettleTime: uniforms.uSettleTime,
       uSlicerEnabled: uniforms.uSlicerEnabled,
       uSlicerOffset: uniforms.uSlicerOffset,
@@ -182,6 +187,7 @@ interface FractalCanvasProps {
     p3: number;
   };
   isInteracting: boolean;
+  interactionType: number;
   settleTime: number;
   isVisible: boolean;
   slicerEnabled: boolean;
