@@ -143,7 +143,7 @@ export const fractalEngine = wgslFn(`
     var derivative = 1.0;
     var radius = 0.0;
     
-    for (var i = 0; i < 64; i = i + 1) {
+    for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
       radius = length(z);
@@ -173,7 +173,7 @@ export const fractalEngine = wgslFn(`
     var dist = max(abs(z.x), max(abs(z.y), abs(z.z))) - 1.0;
     var currentScale = 1.0;
     
-    for (var i = 0; i < 64; i = i + 1) {
+    for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
       let folded = 2.0 * fract((z * currentScale + 1.0) * 0.5) - 1.0;
@@ -195,7 +195,7 @@ export const fractalEngine = wgslFn(`
     var z = point;
     var derivative = 1.0;
     
-    for (var i = 0; i < 64; i = i + 1) {
+    for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
       derivative = 2.0 * length(z) * derivative;
@@ -215,7 +215,7 @@ export const fractalEngine = wgslFn(`
    */
   fn getSierpinskiDistance(point: vec3<f32>, scale: f32, iterations: i32) -> f32 {
     var z = point;
-    for (var i = 0; i < 64; i = i + 1) {
+    for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
       if (z.x + z.y < 0.0) { z = vec3<f32>(-z.y, -z.x, z.z); }
@@ -234,7 +234,7 @@ export const fractalEngine = wgslFn(`
     var z = point;
     var scaleFactor = 1.0;
     
-    for (var i = 0; i < 64; i = i + 1) {
+    for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
       z = clamp(z, vec3<f32>(-1.0), vec3<f32>(1.0)) * 2.0 - z;
@@ -252,6 +252,10 @@ export const fractalEngine = wgslFn(`
       
       z = z * scale + point;
       scaleFactor = scaleFactor * abs(scale) + 1.0;
+      
+      // Stability check: if the point has escaped to extreme distances, stop iterating.
+      // This prevents floating point overflow which causes blackouts.
+      if (dot(z, z) > 1e8) { break; }
     }
     return length(z) / scaleFactor;
   }
@@ -263,7 +267,7 @@ export const fractalEngine = wgslFn(`
     var z = point;
     var scaleFactor = 1.0;
     
-    for (var i = 0; i < 64; i = i + 1) {
+    for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
       z = -1.0 + 2.0 * fract(0.5 * z + 0.5);

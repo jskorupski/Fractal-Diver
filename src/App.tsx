@@ -89,6 +89,7 @@ export default function App() {
   // Throttling refs for state updates
   const lastAdaptiveUpdateRef = useRef<number>(0);
   const lastSettledAdaptiveUpdateRef = useRef<number>(0);
+  const smoothedDeltaRef = useRef<Record<number, number>>({});
 
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -477,6 +478,14 @@ export default function App() {
     const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
     const userOffset = parameters.qualityOffset * parameters.qualityStep;
 
+    // Exponential smoothing for frame delta to prevent "popping"
+    // We use a faster smoothing factor for interactive mode to respond quickly to lag,
+    // and a slower one for settled mode to keep the quality stable.
+    const smoothingFactor = isInteracting ? 0.2 : 0.05;
+    const prevSmoothed = smoothedDeltaRef.current[fractalType] ?? delta;
+    const smoothedDelta = prevSmoothed * (1 - smoothingFactor) + delta * smoothingFactor;
+    smoothedDeltaRef.current[fractalType] = smoothedDelta;
+
     if (isInteracting) {
       // Interactive mode: target 30fps for smooth navigation
       const targetFrameTime = 1 / 30; // 33.3ms
@@ -484,7 +493,7 @@ export default function App() {
       // Normalize delta to ignore the user's quality offset impact
       const currentBase = adaptiveIterations[fractalType];
       const totalIter = Math.max(1, currentBase + userOffset);
-      const normalizedDelta = delta * (currentBase / totalIter);
+      const normalizedDelta = smoothedDelta * (currentBase / totalIter);
 
       setAdaptiveIterations(prev => {
         const current = prev[fractalType];
@@ -513,7 +522,7 @@ export default function App() {
       // Normalize delta to ignore the user's quality offset impact
       const currentBase = adaptiveSettledIterations[fractalType];
       const totalIter = Math.max(1, currentBase + userOffset);
-      const normalizedDelta = delta * (currentBase / totalIter);
+      const normalizedDelta = smoothedDelta * (currentBase / totalIter);
 
       setAdaptiveSettledIterations(prev => {
         const current = prev[fractalType];

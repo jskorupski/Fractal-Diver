@@ -95,7 +95,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     minInteractiveIterations: 6,
     maxInteractiveIterations: 24,
     minSettledIterations: 24,
-    maxSettledIterations: 96,
+    maxSettledIterations: 64,
     parameters: { qualityOffset: 0, qualityStep: 4, p1: 2.0, p2: 0.135, p3: 1.0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
