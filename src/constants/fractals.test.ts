@@ -17,7 +17,8 @@ describe('Fractal Constants', () => {
   it('should have valid initial parameters for each fractal', () => {
     Object.values(FRACTAL_CONFIGS).forEach(config => {
       expect(config.zoom).toBeGreaterThan(0);
-      expect(config.parameters.iterations).toBeGreaterThan(0);
+      expect(typeof config.parameters.qualityOffset).toBe('number');
+      expect(config.parameters.qualityStep).toBeGreaterThan(0);
       expect(Array.isArray(config.offset)).toBe(true);
       expect(config.offset.length).toBe(3);
       expect(config.rotation).toBeDefined();

@@ -28,7 +28,7 @@ describe('App Component', () => {
     const toggleButton = screen.getByRole('button', { name: /settings/i });
     
     fireEvent.click(toggleButton);
-    expect(screen.getByText(/Iterations/i)).toBeInTheDocument();
+    expect(screen.getByText(/Render Quality/i)).toBeInTheDocument();
   });
 
   it('resets the view when the reset button is clicked', () => {
@@ -73,13 +73,13 @@ describe('App Component', () => {
     // Open settings panel
     fireEvent.click(screen.getByRole('button', { name: /settings/i }));
     
-    // Find the iterations slider
-    const iterationsSlider = screen.getByLabelText(/Iterations/i);
+    // Find the quality slider
+    const qualitySlider = screen.getByLabelText(/Quality/i);
     
     // Change the slider value
-    fireEvent.change(iterationsSlider, { target: { value: '64' } });
+    fireEvent.change(qualitySlider, { target: { value: '5' } });
     
     // Check if the value is updated in the UI
-    expect(screen.getByText('64')).toBeInTheDocument();
+    expect(screen.getByText('+5')).toBeInTheDocument();
   });
 });

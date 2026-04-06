@@ -26,7 +26,8 @@ export interface FractalConfig {
   minSettledIterations: number;
   maxSettledIterations: number;
   parameters: {
-    iterations: number;
+    qualityOffset: number; // User adjustment to adaptive iterations (-10 to +10)
+    qualityStep: number;   // How many iterations 1 unit of offset represents
     p1: number; // Generic parameter 1 (e.g. Power, Scale)
     p2: number; // Generic parameter 2 (e.g. Julia C real, MinRadius)
     p3: number; // Generic parameter 3 (e.g. Julia C imag, FixedRadius)
@@ -51,7 +52,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxInteractiveIterations: 32,
     minSettledIterations: 32,
     maxSettledIterations: 128,
-    parameters: { iterations: 48, p1: 8.0, p2: 0, p3: 0 },
+    parameters: { qualityOffset: 0, qualityStep: 4, p1: 8.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "1": { // Menger Sponge
@@ -62,7 +63,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxInteractiveIterations: 8,
     minSettledIterations: 8,
     maxSettledIterations: 24,
-    parameters: { iterations: 6, p1: 5.0, p2: 0, p3: 0 },
+    parameters: { qualityOffset: 0, qualityStep: 1, p1: 5.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "2": { // Julia Set
@@ -73,7 +74,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxInteractiveIterations: 128,
     minSettledIterations: 128,
     maxSettledIterations: 512,
-    parameters: { iterations: 128, p1: 0, p2: -0.8, p3: 0.156 },
+    parameters: { qualityOffset: 0, qualityStep: 16, p1: 0, p2: -0.8, p3: 0.156 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   },
   "3": { // Sierpinski Tetrahedron
@@ -84,7 +85,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxInteractiveIterations: 40,
     minSettledIterations: 40,
     maxSettledIterations: 160,
-    parameters: { iterations: 40, p1: 2.0, p2: 0, p3: 0 },
+    parameters: { qualityOffset: 0, qualityStep: 8, p1: 2.0, p2: 0, p3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "4": { // Mandelbox
@@ -95,7 +96,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxInteractiveIterations: 24,
     minSettledIterations: 24,
     maxSettledIterations: 96,
-    parameters: { iterations: 32, p1: 2.0, p2: 0.135, p3: 1.0 },
+    parameters: { qualityOffset: 0, qualityStep: 4, p1: 2.0, p2: 0.135, p3: 1.0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "5": { // Apollonian
@@ -106,7 +107,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxInteractiveIterations: 10,
     minSettledIterations: 10,
     maxSettledIterations: 40,
-    parameters: { iterations: 10, p1: 1.0, p2: 0, p3: 0 },
+    parameters: { qualityOffset: 0, qualityStep: 2, p1: 1.0, p2: 0, p3: 0 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   }
 };

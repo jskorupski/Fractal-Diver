@@ -29,7 +29,8 @@ export default function App() {
     offset: THREE.Vector3;
     rotation: THREE.Quaternion;
     parameters: {
-      iterations: number;
+      qualityOffset: number;
+      qualityStep: number;
       p1: number;
       p2: number;
       p3: number;
@@ -108,7 +109,7 @@ export default function App() {
     zoom: number; 
     offset: THREE.Vector3; 
     rotation: THREE.Quaternion;
-    parameters: Partial<{ iterations: number; p1: number; p2: number; p3: number }>;
+    parameters: Partial<{ qualityOffset: number; qualityStep: number; p1: number; p2: number; p3: number }>;
     slicer: Partial<{ enabled: boolean; offset: number; axis: number }>;
   }>) => {
     setFractalViews(prev => {
@@ -474,18 +475,25 @@ export default function App() {
   const handleFrameTime = useCallback((delta: number) => {
     const now = performance.now();
     const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
+    const userOffset = parameters.qualityOffset * parameters.qualityStep;
 
     if (isInteracting) {
       // Interactive mode: target 30fps for smooth navigation
       const targetFrameTime = 1 / 30; // 33.3ms
+      
+      // Normalize delta to ignore the user's quality offset impact
+      const currentBase = adaptiveIterations[fractalType];
+      const totalIter = Math.max(1, currentBase + userOffset);
+      const normalizedDelta = delta * (currentBase / totalIter);
+
       setAdaptiveIterations(prev => {
         const current = prev[fractalType];
         let nextIter = current;
         
-        if (delta > targetFrameTime * 1.1) {
+        if (normalizedDelta > targetFrameTime * 1.1) {
           // Too slow, decrease interactive iterations
           nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 0.5);
-        } else if (delta < targetFrameTime * 0.9) {
+        } else if (normalizedDelta < targetFrameTime * 0.9) {
           // Fast enough, increase interactive iterations
           nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.2);
         }
@@ -501,14 +509,20 @@ export default function App() {
     } else {
       // Settled mode: target 15fps for higher detail when static
       const targetFrameTime = 1 / 15; // 66.6ms
+      
+      // Normalize delta to ignore the user's quality offset impact
+      const currentBase = adaptiveSettledIterations[fractalType];
+      const totalIter = Math.max(1, currentBase + userOffset);
+      const normalizedDelta = delta * (currentBase / totalIter);
+
       setAdaptiveSettledIterations(prev => {
         const current = prev[fractalType];
         let nextIter = current;
         
-        if (delta > targetFrameTime * 1.1) {
+        if (normalizedDelta > targetFrameTime * 1.1) {
           // Too slow, decrease settled iterations
           nextIter = Math.max(currentConfig.minSettledIterations, nextIter - 1.0);
-        } else if (delta < targetFrameTime * 0.9) {
+        } else if (normalizedDelta < targetFrameTime * 0.9) {
           // Fast enough, increase settled iterations
           nextIter = Math.min(currentConfig.maxSettledIterations, nextIter + 0.5);
         }
@@ -522,7 +536,7 @@ export default function App() {
         return { ...prev, [fractalType]: nextIter };
       });
     }
-  }, [isInteracting, fractalType]);
+  }, [isInteracting, fractalType, parameters.qualityOffset, parameters.qualityStep, adaptiveIterations, adaptiveSettledIterations]);
 
   // --- Render ---
 
@@ -559,8 +573,8 @@ export default function App() {
         parameters={parameters}
         isInteracting={isInteracting}
         interactionType={interactionType}
-        adaptiveIterations={adaptiveIterations[fractalType]}
-        adaptiveSettledIterations={adaptiveSettledIterations[fractalType]}
+        adaptiveIterations={adaptiveIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep)}
+        adaptiveSettledIterations={adaptiveSettledIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep)}
         onFrameTime={handleFrameTime}
         settleTime={settleTime}
         isVisible={isVisible}
@@ -648,26 +662,32 @@ export default function App() {
                 <span className="text-[10px] font-mono uppercase text-cyan-400 tracking-[0.2em]">Fractal Parameters</span>
               </div>
 
-              {/* Iterations Slider */}
+              {/* Quality Offset Slider */}
               <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-[9px] font-mono uppercase text-cyan-500/60">Iterations</span>
-                  <span className="text-[10px] font-mono text-cyan-400">{parameters.iterations}</span>
+                  <span className="text-[9px] font-mono uppercase text-cyan-500/60">Render Quality</span>
+                  <span className="text-[10px] font-mono text-cyan-400">
+                    {parameters.qualityOffset > 0 ? `+${parameters.qualityOffset}` : parameters.qualityOffset}
+                  </span>
                 </div>
-                <input 
-                  type="range" 
-                  aria-label="Iterations"
-                  min="1" 
-                  max="128" 
-                  step="1"
-                  value={parameters.iterations}
-                  onMouseDown={() => setIsDragging(true)}
-                  onMouseUp={() => setIsDragging(false)}
-                  onTouchStart={() => setIsDragging(true)}
-                  onTouchEnd={() => setIsDragging(false)}
-                  onChange={(e) => updateCurrentView({ parameters: { iterations: parseInt(e.target.value) } })}
-                  className="w-full h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
-                />
+                <div className="flex items-center gap-3">
+                  <span className="text-[8px] font-mono text-cyan-500/40 uppercase">Low</span>
+                  <input 
+                    type="range" 
+                    aria-label="Quality"
+                    min="-10" 
+                    max="10" 
+                    step="1"
+                    value={parameters.qualityOffset}
+                    onMouseDown={() => setIsDragging(true)}
+                    onMouseUp={() => setIsDragging(false)}
+                    onTouchStart={() => setIsDragging(true)}
+                    onTouchEnd={() => setIsDragging(false)}
+                    onChange={(e) => updateCurrentView({ parameters: { qualityOffset: parseInt(e.target.value) } })}
+                    className="flex-1 h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
+                  />
+                  <span className="text-[8px] font-mono text-cyan-500/40 uppercase">High</span>
+                </div>
               </div>
 
               {/* Dynamic Parameter 1 */}

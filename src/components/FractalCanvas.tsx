@@ -42,7 +42,7 @@ interface FractalMeshProps {
   slicerOffset: number;
   slicerAxis: number;
   parameters: {
-    iterations: number;
+    qualityOffset: number;
     p1: number;
     p2: number;
     p3: number;
@@ -97,7 +97,7 @@ function FractalMesh({
     uSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
     uSlicerOffset: uniform(slicerOffset),
     uSlicerAxis: uniform(Math.floor(slicerAxis)),
-    uParams: uniform(new THREE.Vector4(parameters.iterations, parameters.p1, parameters.p2, parameters.p3))
+    uParams: uniform(new THREE.Vector4(parameters.qualityOffset, parameters.p1, parameters.p2, parameters.p3))
   }), []);
 
   // Force re-render when props change
@@ -145,7 +145,7 @@ function FractalMesh({
     uniforms.uSlicerEnabled.value = slicerEnabled ? 1.0 : 0.0;
     uniforms.uSlicerOffset.value = slicerOffset;
     uniforms.uSlicerAxis.value = Math.floor(slicerAxis);
-    uniforms.uParams.value.set(parameters.iterations, parameters.p1, parameters.p2, parameters.p3);
+    uniforms.uParams.value.set(parameters.qualityOffset, parameters.p1, parameters.p2, parameters.p3);
     
     // If we are still smoothing, keep invalidating
     const isStillSmoothing = 
@@ -198,7 +198,7 @@ interface FractalCanvasProps {
   offset: THREE.Vector3;
   rotation: THREE.Quaternion;
   parameters: {
-    iterations: number;
+    qualityOffset: number;
     p1: number;
     p2: number;
     p3: number;
