@@ -4,7 +4,7 @@
 
 > **Dive into the infinite.** A high-performance, real-time 3D fractal explorer powered by WebGPU and Three.js.
 
-Fractal Diver is a cutting-edge web application that allows users to explore complex mathematical structures in three dimensions. Using the latest WebGPU technology via Three.js TSL (Three Shading Language), it renders stunning fractals with incredible detail and fluid performance.
+Fractal Diver allows users to explore complex mathematical structures in three dimensions. Using the latest WebGPU technology via Three.js TSL (Three Shading Language), it renders stunning fractals with incredible detail and fluid performance. Built in [AI Studio](https://ai.studio).
 
 ---
 
