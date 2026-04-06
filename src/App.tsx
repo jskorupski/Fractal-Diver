@@ -528,7 +528,7 @@ export default function App() {
 
   return (
     <div 
-      className="w-full h-screen bg-black relative touch-none overflow-hidden" 
+      className="w-full h-[100dvh] bg-black relative touch-none overflow-hidden" 
       ref={containerRef}
     >
       {/* Branding & Navigation Overlay */}
@@ -577,10 +577,10 @@ export default function App() {
       />
 
       {/* UI Controls Overlay - Futuristic Styling */}
-      <div className={`absolute bottom-4 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-10 flex flex-col items-end gap-3 max-w-full sm:max-w-[400px] transition-opacity duration-300 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+      <div className={`absolute bottom-8 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-10 flex flex-col items-end gap-3 max-w-full sm:max-w-[400px] transition-opacity duration-300 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
         
         {/* Main Controls Group */}
-        <div className="flex items-center gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.2)] w-full sm:w-auto overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.25)] w-full sm:w-auto overflow-x-auto no-scrollbar">
           
           {/* Fractal Selection Menu */}
           <Select 
@@ -641,7 +641,7 @@ export default function App() {
 
         {/* Fractal Parameters Panel */}
         {paramsEnabled && (
-          <div className={`w-full sm:w-80 p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity max-h-[40vh] sm:max-h-[60vh] overflow-y-auto ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+          <div className={`w-full sm:w-80 p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity max-h-[40dvh] sm:max-h-[60dvh] overflow-y-auto ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
             <div className="flex flex-col gap-4 sm:gap-5">
               <div className="flex items-center gap-2 border-b border-cyan-500/20 pb-3">
                 <Settings2 className="w-3 h-3 text-cyan-500" />
