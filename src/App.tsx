@@ -99,10 +99,13 @@ export default function App() {
   const lastAdaptiveUpdateRef = useRef<number>(0);
   const lastSettledAdaptiveUpdateRef = useRef<number>(0);
   const interactionStartTimeRef = useRef<number>(0);
-  const smoothedDeltaRef = useRef<Record<number, number>>({});
+  const interactiveSmoothedDeltaRef = useRef<Record<number, number>>({});
+  const settledSmoothedDeltaRef = useRef<Record<number, number>>({});
   const lastActualMoveTimeRef = useRef<number>(0);
   const lastViewUpdateRef = useRef<number>(0);
-  const sampleCountRef = useRef<Record<number, number>>({});
+  const interactiveSampleCountRef = useRef<Record<number, number>>({});
+  const settledSampleCountRef = useRef<Record<number, number>>({});
+  const lastInteractionStateRef = useRef<boolean>(false);
 
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -252,8 +255,7 @@ export default function App() {
 
       // Set timeout to end interaction
       wheelTimeoutRef.current = setTimeout(() => {
-        setIsInteracting(false);
-        setInteractionType(0);
+        endInteraction();
         wheelTimeoutRef.current = null;
       }, 200);
 
@@ -289,22 +291,36 @@ export default function App() {
    * Resets adaptive iteration counters and gesture tracking.
    * @param type The type of interaction (1: Pan/Rotate, 2: Zoom/Pan)
    */
-  const startInteraction = (type: number) => {
+  const startInteraction = useCallback((type: number) => {
     setIsInteracting(true);
     setInteractionType(type);
     setSettleTime(0);
     interactionStartTimeRef.current = performance.now();
     
-    // Reset sample counts for the adaptive iteration PID-like logic
+    // Reset sample counts for the adaptive iteration logic
     // This ensures we start fresh with each new interaction.
-    sampleCountRef.current = {}; 
+    interactiveSampleCountRef.current[fractalType] = 0;
+    delete interactiveSmoothedDeltaRef.current[fractalType];
     
     // Reset multi-touch gesture tracking
     gestureModeRef.current = 0; // 0: none, 1: zoom, 2: pan
     
     // Reset view update throttle to allow immediate response for new interaction
     lastViewUpdateRef.current = 0;
-  };
+  }, [fractalType]);
+
+  /**
+   * Finalizes interaction state.
+   * Resets settled iteration counters to ensure a clean transition to settled mode.
+   */
+  const endInteraction = useCallback(() => {
+    setIsInteracting(false);
+    setInteractionType(0);
+    // Reset settled sample count to avoid adapting on the first few frames after interaction ends
+    // which might contain "leftover" work from the interactive state.
+    settledSampleCountRef.current[fractalType] = 0;
+    delete settledSmoothedDeltaRef.current[fractalType];
+  }, [fractalType]);
 
   /**
    * Handles the start of a touch interaction.
@@ -419,8 +435,7 @@ export default function App() {
    * Handles mouse up events.
    */
   const handleMouseUp = () => {
-    setIsInteracting(false);
-    setInteractionType(0);
+    endInteraction();
     lastTouchRef.current = null;
   };
 
@@ -545,8 +560,7 @@ export default function App() {
    */
   const handleTouchEnd = (e: ReactTouchEvent) => {
     if (e.touches.length === 0) {
-      setIsInteracting(false);
-      setInteractionType(0);
+      endInteraction();
       lastTouchRef.current = null;
       lastPinchDistRef.current = null;
     } else {
@@ -565,25 +579,37 @@ export default function App() {
     const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
     const userOffset = parameters.qualityOffset * parameters.qualityStep;
 
+    // Detect state transition to prevent "polluted" deltas from the previous state
+    // (e.g. a slow settled frame being counted as a slow interactive frame)
+    if (isInteracting !== lastInteractionStateRef.current) {
+      lastInteractionStateRef.current = isInteracting;
+      if (isInteracting) {
+        interactiveSampleCountRef.current[fractalType] = 0;
+        delete interactiveSmoothedDeltaRef.current[fractalType];
+      } else {
+        settledSampleCountRef.current[fractalType] = 0;
+        delete settledSmoothedDeltaRef.current[fractalType];
+      }
+      return;
+    }
+
     // Exponential smoothing for frame delta to prevent "popping"
-    // We use a faster smoothing factor for interactive mode to respond quickly to lag,
-    // and a slower one for settled mode to keep the quality stable.
-    // Adaptive smoothing: as the interaction continues, we increase smoothing (lower factor) to stabilize.
+    // We use separate trackers for interactive and settled modes.
     const interactionDuration = now - interactionStartTimeRef.current;
     const baseSmoothing = isInteracting ? 0.25 : 0.08;
     const smoothingFactor = isInteracting 
       ? Math.max(0.05, baseSmoothing * Math.exp(-interactionDuration / 2000)) 
       : baseSmoothing;
     
-    const prevSmoothed = smoothedDeltaRef.current[fractalType] ?? delta;
-    const smoothedDelta = prevSmoothed * (1 - smoothingFactor) + delta * smoothingFactor;
-    smoothedDeltaRef.current[fractalType] = smoothedDelta;
-
-    // Track sample count to ensure we have enough data before making a change
-    sampleCountRef.current[fractalType] = (sampleCountRef.current[fractalType] ?? 0) + 1;
-    const minSamples = isInteracting ? 5 : 15;
-
     if (isInteracting) {
+      const prevSmoothed = interactiveSmoothedDeltaRef.current[fractalType] ?? delta;
+      const smoothedDelta = prevSmoothed * (1 - smoothingFactor) + delta * smoothingFactor;
+      interactiveSmoothedDeltaRef.current[fractalType] = smoothedDelta;
+
+      // Track sample count
+      interactiveSampleCountRef.current[fractalType] = (interactiveSampleCountRef.current[fractalType] ?? 0) + 1;
+      const minSamples = 5;
+
       // Interactive mode: target 30fps for smooth navigation
       const targetFrameTime = 1 / 30; // 33.3ms
       
@@ -600,7 +626,6 @@ export default function App() {
         let nextIter = current;
         
         // Hysteresis / Deadband logic:
-        // We use a wider deadband to prevent "bouncing" between iteration counts.
         // Decrease if > 1.2x target, Increase if < 0.75x target.
         if (normalizedDelta > targetFrameTime * 1.5) {
           // Critical lag: drop iterations very aggressively
@@ -610,13 +635,12 @@ export default function App() {
           nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 1.0 * aggressiveness);
         } else if (normalizedDelta < targetFrameTime * 0.75) {
           // Fast enough: increase iterations to improve quality.
-          // We use a smaller step for increasing to avoid immediate frame drops.
           nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.25 * aggressiveness);
         }
         
-        if (nextIter === current || sampleCountRef.current[fractalType] < minSamples) return prev;
+        if (nextIter === current || interactiveSampleCountRef.current[fractalType] < minSamples) return prev;
         
-        // Throttle state updates to prevent React re-render overhead from becoming the bottleneck.
+        // Throttle state updates
         const isActuallyMoving = now - lastActualMoveTimeRef.current < 100;
         const throttleTime = isActuallyMoving ? 16 : Math.max(16, Math.min(100, interactionDuration / 10));
         
@@ -626,6 +650,14 @@ export default function App() {
         return { ...prev, [fractalType]: nextIter };
       });
     } else {
+      const prevSmoothed = settledSmoothedDeltaRef.current[fractalType] ?? delta;
+      const smoothedDelta = prevSmoothed * (1 - smoothingFactor) + delta * smoothingFactor;
+      settledSmoothedDeltaRef.current[fractalType] = smoothedDelta;
+
+      // Track sample count
+      settledSampleCountRef.current[fractalType] = (settledSampleCountRef.current[fractalType] ?? 0) + 1;
+      const minSamples = 15;
+
       // Settled mode: target 15fps for higher detail when static
       const targetFrameTime = 1 / 15; // 66.6ms
       
@@ -633,6 +665,10 @@ export default function App() {
       const currentBase = adaptiveSettledIterations[fractalType];
       const totalIter = Math.max(1, currentBase + userOffset);
       const normalizedDelta = smoothedDelta * (currentBase / totalIter);
+
+      // Only adapt settled iterations when we are actually settled (settleTime is high)
+      // or if we are clearly over-budget.
+      if (settleTime < 0.5 && normalizedDelta < targetFrameTime) return;
 
       setAdaptiveSettledIterations(prev => {
         const current = prev[fractalType];
@@ -647,16 +683,16 @@ export default function App() {
           nextIter = Math.min(currentConfig.maxSettledIterations, nextIter + 0.4);
         }
         
-        if (nextIter === current || sampleCountRef.current[fractalType] < minSamples) return prev;
+        if (nextIter === current || settledSampleCountRef.current[fractalType] < minSamples) return prev;
         
-        // Throttle state updates to ~5fps for settled mode as it's less critical
+        // Throttle state updates to ~5fps for settled mode
         if (now - lastSettledAdaptiveUpdateRef.current < 200) return prev;
         lastSettledAdaptiveUpdateRef.current = now;
         
         return { ...prev, [fractalType]: nextIter };
       });
     }
-  }, [isInteracting, fractalType, parameters.qualityOffset, parameters.qualityStep, adaptiveIterations, adaptiveSettledIterations]);
+  }, [isInteracting, fractalType, parameters.qualityOffset, parameters.qualityStep, adaptiveIterations, adaptiveSettledIterations, settleTime, startInteraction, endInteraction]);
 
   // --- Render ---
 
@@ -664,6 +700,7 @@ export default function App() {
     <div 
       className="w-full h-[100dvh] bg-black relative touch-none overflow-hidden" 
       ref={containerRef}
+      data-testid="app-container"
     >
       {/* Branding & Navigation Overlay */}
       <div className={`absolute top-4 left-4 sm:top-8 sm:left-8 z-10 flex flex-col gap-1.5 pointer-events-none transition-opacity duration-500 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
@@ -954,6 +991,7 @@ export default function App() {
                     <div className="absolute w-full h-[2px] bg-cyan-500/20" />
                     <input 
                       type="range" 
+                      aria-label="Slicer Offset"
                       min="-2" 
                       max="2" 
                       step="0.01"

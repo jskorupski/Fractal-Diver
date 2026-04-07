@@ -207,4 +207,123 @@ describe('App Component', () => {
     
     nowSpy.mockRestore();
   });
+
+  it('handles mouse rotation', () => {
+    render(<App />);
+    const canvas = screen.getByTestId('fractal-canvas');
+    
+    // Start dragging
+    fireEvent.mouseDown(canvas, { clientX: 100, clientY: 100 });
+    
+    // Move mouse
+    fireEvent.mouseMove(canvas, { clientX: 110, clientY: 110 });
+    
+    // Check if rotation prop changed in mock calls
+    const lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(lastCallProps.rotation).toBeDefined();
+    
+    fireEvent.mouseUp(canvas);
+  });
+
+  it('handles mouse panning with shift key', () => {
+    render(<App />);
+    const canvas = screen.getByTestId('fractal-canvas');
+    
+    // Start dragging with shift
+    fireEvent.mouseDown(canvas, { clientX: 100, clientY: 100, shiftKey: true });
+    
+    // Move mouse
+    fireEvent.mouseMove(canvas, { clientX: 110, clientY: 110, shiftKey: true });
+    
+    // Check if offset prop changed
+    const lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(lastCallProps.offset.x).not.toBe(0);
+    
+    fireEvent.mouseUp(canvas);
+  });
+
+  it('handles mouse wheel zooming', () => {
+    render(<App />);
+    const container = screen.getByTestId('app-container');
+    
+    // Scroll down (zoom out)
+    fireEvent.wheel(container, { deltaY: 100 });
+    
+    const lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    // Mandelbulb default zoom is 1.2. With deltaY = 100, zoom should decrease.
+    expect(lastCallProps.zoom).toBeLessThan(1.2);
+  });
+
+  it('handles slicer parameter changes', () => {
+    render(<App />);
+    // Enable slicer
+    fireEvent.click(screen.getByTestId('slicer-toggle'));
+    
+    // Find slicer offset slider by its role and value
+    const slicerSlider = screen.getByRole('slider', { name: /Slicer Offset/i });
+    fireEvent.change(slicerSlider, { target: { value: '0.5' } });
+    
+    const lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(lastCallProps.slicerOffset).toBe(0.5);
+  });
+
+  it('handles visibility changes', () => {
+    render(<App />);
+    
+    // Mock visibilityState
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', writable: true });
+    fireEvent(document, new Event('visibilitychange'));
+    
+    const lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(lastCallProps.isVisible).toBe(false);
+    
+    // Back to visible
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true });
+    fireEvent(document, new Event('visibilitychange'));
+    
+    const visibleCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(visibleCallProps.isVisible).toBe(true);
+  });
+
+  it('adapts iterations based on frame time', async () => {
+    render(<App />);
+    // Get the most recent call to FractalCanvas
+    const lastCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    const handleFrameTime = lastCall.onFrameTime;
+    
+    // Simulate slow frames (e.g. 100ms) while not interacting
+    // We need enough samples (min 15 for settled)
+    await act(async () => {
+      for (let i = 0; i < 20; i++) {
+        handleFrameTime(0.1);
+      }
+    });
+    
+    // Check if adaptiveSettledIterations decreased (default is 100 for Mandelbulb)
+    const updatedCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(updatedCall.adaptiveSettledIterations).toBeLessThan(100);
+  });
+
+  it('adapts iterations during interaction', async () => {
+    render(<App />);
+    const container = screen.getByTestId('app-container');
+    
+    // Start interaction
+    fireEvent.mouseDown(container, { clientX: 100, clientY: 100 });
+    
+    const lastCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    const handleFrameTime = lastCall.onFrameTime;
+    
+    // Simulate slow frames (e.g. 100ms) while interacting
+    // Target is 30fps (33ms), so 100ms is very slow.
+    await act(async () => {
+      for (let i = 0; i < 10; i++) {
+        handleFrameTime(0.1);
+      }
+    });
+    
+    const updatedCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    // Interactive iterations should decrease (default is 32 for Mandelbulb)
+    expect(updatedCall.adaptiveIterations).toBeLessThan(32);
+  });
 });
