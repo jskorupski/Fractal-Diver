@@ -106,6 +106,7 @@ export default function App() {
   const interactiveSampleCountRef = useRef<Record<number, number>>({});
   const settledSampleCountRef = useRef<Record<number, number>>({});
   const lastInteractionStateRef = useRef<boolean>(false);
+  const isLowEndRef = useRef<Record<number, boolean>>({});
 
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -614,15 +615,17 @@ export default function App() {
       const minSamples = 5;
 
       // Interactive mode: target 30fps for smooth navigation
-      const targetFrameTime = 1 / 30; // 33.3ms
+      // If struggling, target 15fps
+      const targetFrameTime = (isLowEndRef.current[fractalType] ?? false) ? 1 / 15 : 1 / 30; // 66.6ms or 33.3ms
       
       // Calculate dynamic minimum iterations based on zoom level.
       // As we zoom in, we need more iterations to prevent "blobby" details.
+      const minBase = (isLowEndRef.current[fractalType] ?? false) ? currentConfig.minInteractiveIterationsLowEnd : currentConfig.minInteractiveIterations;
       const currentZoom = fractalViewsRef.current[fractalType].zoom;
       const zoomFactor = Math.log2(Math.max(1, currentZoom));
       const dynamicMinIterations = Math.max(
-        currentConfig.minInteractiveIterations,
-        currentConfig.minInteractiveIterations + zoomFactor * 2
+        minBase,
+        minBase + zoomFactor * 2
       );
       
       // Aggressiveness starts high (4.0) and decays exponentially to 1.0 over ~500ms.
@@ -632,6 +635,19 @@ export default function App() {
       const currentBase = adaptiveIterations[fractalType];
       const totalIter = Math.max(1, currentBase + userOffset);
       const normalizedDelta = smoothedDelta * (currentBase / totalIter);
+      
+      // Detect struggling: if normalizedDelta is consistently high, set isLowEnd
+      if (normalizedDelta > targetFrameTime * 2.0) {
+        if (interactiveSampleCountRef.current[fractalType]! > 30) {
+          if (!(isLowEndRef.current[fractalType] ?? false)) {
+            isLowEndRef.current[fractalType] = true;
+          }
+        }
+      } else if (normalizedDelta < targetFrameTime * 0.5) {
+        if (isLowEndRef.current[fractalType] ?? false) {
+          isLowEndRef.current[fractalType] = false;
+        }
+      }
 
       setAdaptiveIterations(prev => {
         const current = prev[fractalType];
@@ -671,12 +687,22 @@ export default function App() {
       const minSamples = 15;
 
       // Settled mode: target 15fps for higher detail when static
-      const targetFrameTime = 1 / 15; // 66.6ms
+      // If struggling, target 8fps
+      const targetFrameTime = (isLowEndRef.current[fractalType] ?? false) ? 1 / 8 : 1 / 15; // 125ms or 66.6ms
       
       // Normalize delta to ignore the user's quality offset impact
       const currentBase = adaptiveSettledIterations[fractalType];
       const totalIter = Math.max(1, currentBase + userOffset);
       const normalizedDelta = smoothedDelta * (currentBase / totalIter);
+      
+      // Calculate dynamic minimum iterations based on zoom level.
+      const minBase = (isLowEndRef.current[fractalType] ?? false) ? currentConfig.minSettledIterationsLowEnd : currentConfig.minSettledIterations;
+      const currentZoom = fractalViewsRef.current[fractalType].zoom;
+      const zoomFactor = Math.log2(Math.max(1, currentZoom));
+      const dynamicMinIterations = Math.max(
+        minBase,
+        minBase + zoomFactor * 4
+      );
 
       // Only adapt settled iterations when we are actually settled (settleTime is high)
       // or if we are clearly over-budget.
@@ -689,7 +715,7 @@ export default function App() {
         // Wider deadband for settled mode to keep the image stable
         if (normalizedDelta > targetFrameTime * 1.25) {
           // Too slow, decrease settled iterations
-          nextIter = Math.max(currentConfig.minSettledIterations, nextIter - 1.5);
+          nextIter = Math.max(dynamicMinIterations, nextIter - 1.5);
         } else if (normalizedDelta < targetFrameTime * 0.7) {
           // Fast enough, increase settled iterations
           nextIter = Math.min(currentConfig.maxSettledIterations, nextIter + 0.4);
@@ -862,8 +888,8 @@ export default function App() {
                   <input 
                     type="range" 
                     aria-label="Quality"
-                    min="-10" 
-                    max="10" 
+                    min="-2" 
+                    max="2" 
                     step="1"
                     value={parameters.qualityOffset}
                     onMouseDown={() => { setIsDragging(true); setDraggingParam('quality'); }}

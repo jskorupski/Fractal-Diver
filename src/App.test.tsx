@@ -91,10 +91,10 @@ describe('App Component', () => {
     const qualitySlider = screen.getByLabelText(/Quality/i);
     
     // Change the slider value
-    fireEvent.change(qualitySlider, { target: { value: '5' } });
+    fireEvent.change(qualitySlider, { target: { value: '1' } });
     
     // Check if the value is updated in the UI
-    expect(screen.getByText('+5')).toBeInTheDocument();
+    expect(screen.getByText('+1')).toBeInTheDocument();
   });
 
   it('updates opacity when a parameter is being dragged', () => {
