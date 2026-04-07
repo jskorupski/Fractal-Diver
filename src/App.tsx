@@ -110,6 +110,9 @@ export default function App() {
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
   
+  const fractalViewsRef = useRef(fractalViews);
+  useEffect(() => { fractalViewsRef.current = fractalViews; }, [fractalViews]);
+  
   const wheelTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get current view parameters
@@ -596,7 +599,7 @@ export default function App() {
     // Exponential smoothing for frame delta to prevent "popping"
     // We use separate trackers for interactive and settled modes.
     const interactionDuration = now - interactionStartTimeRef.current;
-    const baseSmoothing = isInteracting ? 0.25 : 0.08;
+    const baseSmoothing = isInteracting ? 0.15 : 0.08;
     const smoothingFactor = isInteracting 
       ? Math.max(0.05, baseSmoothing * Math.exp(-interactionDuration / 2000)) 
       : baseSmoothing;
@@ -613,8 +616,17 @@ export default function App() {
       // Interactive mode: target 30fps for smooth navigation
       const targetFrameTime = 1 / 30; // 33.3ms
       
-      // Aggressiveness starts high (8.0) and decays exponentially to 1.0 over ~1 second.
-      const aggressiveness = Math.max(1.0, 8.0 * Math.exp(-interactionDuration / 1000));
+      // Calculate dynamic minimum iterations based on zoom level.
+      // As we zoom in, we need more iterations to prevent "blobby" details.
+      const currentZoom = fractalViewsRef.current[fractalType].zoom;
+      const zoomFactor = Math.log2(Math.max(1, currentZoom));
+      const dynamicMinIterations = Math.max(
+        currentConfig.minInteractiveIterations,
+        currentConfig.minInteractiveIterations + zoomFactor * 2
+      );
+      
+      // Aggressiveness starts high (4.0) and decays exponentially to 1.0 over ~500ms.
+      const aggressiveness = Math.max(1.0, 4.0 * Math.exp(-interactionDuration / 500));
       
       // Normalize delta to ignore the user's quality offset impact.
       const currentBase = adaptiveIterations[fractalType];
@@ -628,14 +640,14 @@ export default function App() {
         // Hysteresis / Deadband logic:
         // Decrease if > 1.2x target, Increase if < 0.75x target.
         if (normalizedDelta > targetFrameTime * 1.5) {
-          // Critical lag: drop iterations very aggressively
-          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 3.0 * aggressiveness);
+          // Critical lag: drop iterations
+          nextIter = Math.max(dynamicMinIterations, nextIter - 2.0 * aggressiveness);
         } else if (normalizedDelta > targetFrameTime * 1.2) {
           // Too slow: decrease iterations
-          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 1.0 * aggressiveness);
+          nextIter = Math.max(dynamicMinIterations, nextIter - 0.5 * aggressiveness);
         } else if (normalizedDelta < targetFrameTime * 0.75) {
           // Fast enough: increase iterations to improve quality.
-          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.25 * aggressiveness);
+          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.1 * aggressiveness);
         }
         
         if (nextIter === current || interactiveSampleCountRef.current[fractalType] < minSamples) return prev;
