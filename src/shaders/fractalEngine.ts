@@ -54,13 +54,14 @@ export const fractalEngine = wgslFn(`
       let currentPoint = rayOrigin + rayDirection * totalDist;
       
       // Dynamic precision threshold
-      let threshold = max(0.0000001, mix(0.0002, 0.000005, uSettleTime) * totalDist / uZoom);
+      // User requested more conservative threshold when settled to reduce graininess
+      let threshold = max(0.0000001, mix(0.0002, 0.000010, uSettleTime) * totalDist / uZoom);
       
       // Transform to global fractal space
       let globalPoint = currentPoint / uZoom;
       
       // Sample distance
-      let dist = getFractalDistance(
+      let data = getFractalData(
         globalPoint, 
         uType, 
         uParams, 
@@ -72,7 +73,8 @@ export const fractalEngine = wgslFn(`
         uInteractionType,
         uAdaptiveIterations,
         uAdaptiveSettledIterations
-      ) * uZoom;
+      );
+      let dist = data.x * uZoom;
       
       if (dist < threshold) {
         isHit = true;
@@ -89,43 +91,72 @@ export const fractalEngine = wgslFn(`
     // --- Shading ---
     if (isHit) {
       let hitPoint = rayOrigin + rayDirection * totalDist;
-      let epsilon = 0.0005;
+      
+      // Dynamic precision threshold for normal calculation
+      let threshold = max(0.0000001, mix(0.0002, 0.000010, uSettleTime) * totalDist / uZoom);
+      let epsilon = max(0.0000001, threshold * 0.5);
       
       // Normal calculation via finite difference
       let pG = hitPoint / uZoom;
-      let dC = getFractalDistance(pG, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations);
+      let hitData = getFractalData(pG, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations);
+      let dC = hitData.x;
       
       let pX = (hitPoint + vec3<f32>(epsilon, 0.0, 0.0)) / uZoom;
-      let dX = getFractalDistance(pX, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations);
+      let dX = getFractalData(pX, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations).x;
       
       let pY = (hitPoint + vec3<f32>(0.0, epsilon, 0.0)) / uZoom;
-      let dY = getFractalDistance(pY, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations);
+      let dY = getFractalData(pY, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations).x;
       
       let pZ = (hitPoint + vec3<f32>(0.0, 0.0, epsilon)) / uZoom;
-      let dZ = getFractalDistance(pZ, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations);
+      let dZ = getFractalData(pZ, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations).x;
       
       let normal = normalize(vec3<f32>(dX, dY, dZ) - dC);
       
       // Lighting components
       let ambientOcclusion = 1.0 - f32(stepCount) / f32(maxSteps);
       let lightDir = normalize(vec3<f32>(1.0, 1.0, -1.0));
-      let diffuse = max(0.0, dot(normal, lightDir)) * 0.7 + 0.3;
+      let diffuse = max(0.0, dot(normal, lightDir)) * 0.6 + 0.4;
       let rim = pow(1.0 - max(0.0, dot(normal, -rayDirection)), 4.0);
       
-      // Color selection
-      var baseColor = vec3<f32>(0.4, 0.6, 1.0);
-      if (uType == 0) { baseColor = vec3<f32>(1.0, 0.6, 0.3); }
-      else if (uType == 1) { baseColor = vec3<f32>(0.7, 0.7, 0.7); }
-      else if (uType == 3) { baseColor = vec3<f32>(1.0, 0.4, 0.4); }
+      // Color selection with subtle palettes
+      var baseColor = vec3<f32>(0.4, 0.6, 1.0); // Default Blue
+      var accentColor = vec3<f32>(0.2, 0.4, 0.8);
       
-      // Position-based color variation
-      let variation = fract(hitPoint / uZoom * 0.5 + 0.5);
-      baseColor = mix(baseColor, variation, 0.15);
+      if (uType == 0) { 
+        baseColor = vec3<f32>(1.0, 0.6, 0.3); // Gold/Orange
+        accentColor = vec3<f32>(0.8, 0.2, 0.1);
+      } else if (uType == 1) { 
+        baseColor = vec3<f32>(0.7, 0.7, 0.7); // Silver
+        accentColor = vec3<f32>(0.4, 0.5, 0.6);
+      } else if (uType == 2) { 
+        baseColor = vec3<f32>(0.6, 0.3, 0.9); // Purple
+        accentColor = vec3<f32>(0.2, 0.1, 0.4);
+      } else if (uType == 3) { 
+        baseColor = vec3<f32>(1.0, 0.4, 0.4); // Red
+        accentColor = vec3<f32>(0.6, 0.1, 0.1);
+      } else if (uType == 4) { 
+        baseColor = vec3<f32>(0.3, 0.8, 0.6); // Emerald
+        accentColor = vec3<f32>(0.1, 0.3, 0.2);
+      } else if (uType == 5) { 
+        baseColor = vec3<f32>(0.9, 0.8, 0.4); // Sand
+        accentColor = vec3<f32>(0.5, 0.3, 0.1);
+      }
+      
+      // Apply stronger color variation based on orbit trap data
+      // Using a non-linear mapping (pow) to make the transitions more dramatic
+      let colorFactor = clamp(hitData.y, 0.0, 1.0);
+      let boostedFactor = pow(colorFactor, 0.5); // Boost mid-tones
+      baseColor = mix(baseColor, accentColor, boostedFactor * 0.6);
+      
+      // Position-based color variation (very subtle)
+      let variation = fract(hitPoint / uZoom * 0.2 + 0.5);
+      baseColor = mix(baseColor, variation, 0.08);
       
       let finalColor = (baseColor * diffuse + rim * 0.4) * ambientOcclusion;
       
-      // Depth fog
-      let fogFactor = exp(-0.45 * totalDist);
+      // Depth fog - adjusted for better brightness at a distance
+      // We use a softer exponent and a small constant boost
+      let fogFactor = exp(-0.25 * totalDist) + 0.05;
       return vec4<f32>(finalColor * fogFactor, 1.0);
     }
     
@@ -134,26 +165,32 @@ export const fractalEngine = wgslFn(`
   }
 
   // --- Distance Estimation Functions ---
-
+  
   /**
    * Mandelbulb Distance Estimator
+   * Returns vec2(distance, colorFactor)
    */
-  fn getMandelbulbDistance(point: vec3<f32>, power: f32, iterations: i32) -> f32 {
+  fn getMandelbulbData(point: vec3<f32>, power: f32, iterations: i32) -> vec2<f32> {
     var z = point;
     var derivative = 1.0;
     var radius = 0.0;
+    var orbitTrap = 1e10;
     
     for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
       radius = length(z);
+      orbitTrap = min(orbitTrap, dot(z, z));
       if (radius > 4.0) { break; }
       
+      // Convert to spherical coordinates
       let theta = acos(z.z / radius);
       let phi = atan2(z.y, z.x);
       
+      // Calculate derivative for distance estimation
       derivative = pow(radius, power - 1.0) * power * derivative + 1.0;
       
+      // Raise radius to the power and multiply by the spherical components
       let zr = pow(radius, power);
       z = zr * vec3<f32>(
         sin(theta * power) * cos(phi * power), 
@@ -162,110 +199,140 @@ export const fractalEngine = wgslFn(`
       ) + point;
     }
     
-    return 0.5 * log(radius) * radius / derivative;
+    return vec2<f32>(0.5 * log(radius) * radius / derivative, clamp(orbitTrap / 16.0, 0.0, 1.0));
   }
 
   /**
    * Menger Sponge Distance Estimator
+   * Returns vec2(distance, colorFactor)
    */
-  fn getMengerSpongeDistance(point: vec3<f32>, scale: f32, iterations: i32) -> f32 {
+  fn getMengerSpongeData(point: vec3<f32>, scale: f32, iterations: i32) -> vec2<f32> {
     var z = point;
-    var dist = max(abs(z.x), max(abs(z.y), abs(z.z))) - 1.0;
-    var currentScale = 1.0;
+    // Base box
+    var d = max(abs(z.x), max(abs(z.y), abs(z.z))) - 1.0;
+    var s = 1.0;
+    var orbitTrap = 1.0;
     
     for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
-      let folded = 2.0 * fract((z * currentScale + 1.0) * 0.5) - 1.0;
-      currentScale = currentScale * scale;
+      // Recursive folding and scaling. 
+      // We use fract to repeat the space and abs to mirror it, creating the recursive holes.
+      let a = abs(1.0 - scale * abs(fract((z * s + 1.0) * 0.5) * 2.0 - 1.0));
+      s *= scale;
       
-      let r = abs(1.0 - scale * abs(folded));
-      let holeDist = (1.0 - min(max(r.x, r.y), min(max(r.x, r.z), max(r.y, r.z)))) / currentScale;
-      dist = max(dist, holeDist);
+      // Calculate distance to the three orthogonal "cross" shapes that form the sponge holes.
+      let da = max(a.x, a.y);
+      let db = max(a.y, a.z);
+      let dc = max(a.z, a.x);
+      let c = (1.0 - min(da, min(db, dc))) / s;
       
-      if (dist > 0.5 / currentScale) { break; }
+      // The distance to the sponge is the maximum of the base box and the recursive holes.
+      if (c > d) {
+        d = c;
+        orbitTrap = f32(i) / f32(iterations);
+      }
     }
-    return dist;
+    return vec2<f32>(d, orbitTrap);
   }
 
   /**
-   * Julia Set (3D Quaternion-like) Distance Estimator
+   * Julia Set Distance Estimator
+   * Returns vec2(distance, colorFactor)
    */
-  fn getJuliaDistance(point: vec3<f32>, constant: vec3<f32>, iterations: i32) -> f32 {
+  fn getJuliaData(point: vec3<f32>, constant: vec3<f32>, iterations: i32) -> vec2<f32> {
     var z = point;
     var derivative = 1.0;
+    var orbitTrap = 1e10;
     
     for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
+      // Calculate the derivative for distance estimation: d(z^2 + c)/dz = 2z
       derivative = 2.0 * length(z) * derivative;
+      
+      // Apply the Julia iteration: z = z^2 + c
+      // This is a 3D extension of the complex Julia set.
       z = vec3<f32>(
         z.x * z.x - z.y * z.y - z.z * z.z, 
         2.0 * z.x * z.y, 
         2.0 * z.x * z.z
       ) + constant;
       
+      orbitTrap = min(orbitTrap, dot(z, z));
       if (length(z) > 4.0) { break; }
     }
-    return 0.5 * length(z) * log(length(z)) / derivative;
+    // Distance estimation formula: 0.5 * |z| * log(|z|) / |z'|
+    return vec2<f32>(0.5 * length(z) * log(length(z)) / derivative, clamp(orbitTrap / 16.0, 0.0, 1.0));
   }
 
   /**
    * Sierpinski Tetrahedron Distance Estimator
+   * Returns vec2(distance, colorFactor)
    */
-  fn getSierpinskiDistance(point: vec3<f32>, scale: f32, iterations: i32) -> f32 {
+  fn getSierpinskiData(point: vec3<f32>, scale: f32, iterations: i32) -> vec2<f32> {
     var z = point;
+    var folds = 0.0;
     for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
-      if (z.x + z.y < 0.0) { z = vec3<f32>(-z.y, -z.x, z.z); }
-      if (z.x + z.z < 0.0) { z = vec3<f32>(-z.z, z.y, -z.x); }
-      if (z.y + z.z < 0.0) { z = vec3<f32>(z.x, -z.z, -z.y); }
+      if (z.x + z.y < 0.0) { z = vec3<f32>(-z.y, -z.x, z.z); folds += 1.0; }
+      if (z.x + z.z < 0.0) { z = vec3<f32>(-z.z, z.y, -z.x); folds += 1.0; }
+      if (z.y + z.z < 0.0) { z = vec3<f32>(z.x, -z.z, -z.y); folds += 1.0; }
       
       z = z * scale - vec3<f32>(1.0) * (scale - 1.0);
     }
-    return length(z) * pow(scale, -f32(iterations));
+    return vec2<f32>(length(z) * pow(scale, -f32(iterations)), folds / (3.0 * f32(iterations)));
   }
 
   /**
    * Mandelbox Distance Estimator
+   * Returns vec2(distance, colorFactor)
    */
-  fn getMandelboxDistance(point: vec3<f32>, scale: f32, minRadius: f32, fixedRadius: f32, iterations: i32) -> f32 {
+  fn getMandelboxData(point: vec3<f32>, scale: f32, minRadius: f32, fixedRadius: f32, iterations: i32) -> vec2<f32> {
     var z = point;
     var scaleFactor = 1.0;
+    var orbitTrap = 1e10;
     
     for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
       
+      // Box Fold: Reflects points outside the [-1, 1] box back inside.
       z = clamp(z, vec3<f32>(-1.0), vec3<f32>(1.0)) * 2.0 - z;
       
+      // Sphere Fold: Inverts points within a certain radius.
       let r2 = dot(z, z);
       if (r2 < minRadius * minRadius) {
+        // Linear scaling for points very close to the origin to avoid division by zero.
         let k = (fixedRadius * fixedRadius) / (minRadius * minRadius);
         z = z * k;
         scaleFactor = scaleFactor * k;
       } else if (r2 < fixedRadius * fixedRadius) {
+        // Standard spherical inversion.
         let k = (fixedRadius * fixedRadius) / r2;
         z = z * k;
         scaleFactor = scaleFactor * k;
       }
       
+      // Scale and translate back to the original point.
       z = z * scale + point;
       scaleFactor = scaleFactor * abs(scale) + 1.0;
       
-      // Stability check: if the point has escaped to extreme distances, stop iterating.
-      // This prevents floating point overflow which causes blackouts.
+      orbitTrap = min(orbitTrap, r2);
+      
       if (dot(z, z) > 1e8) { break; }
     }
-    return length(z) / scaleFactor;
+    return vec2<f32>(length(z) / scaleFactor, clamp(orbitTrap, 0.0, 1.0));
   }
 
   /**
    * Apollonian Gasket Distance Estimator
+   * Returns vec2(distance, colorFactor)
    */
-  fn getApollonianDistance(point: vec3<f32>, scale: f32, iterations: i32) -> f32 {
+  fn getApollonianData(point: vec3<f32>, scale: f32, iterations: i32) -> vec2<f32> {
     var z = point;
     var scaleFactor = 1.0;
+    var orbitTrap = 1e10;
     
     for (var i = 0; i < 128; i = i + 1) {
       if (i >= iterations) { break; }
@@ -275,14 +342,15 @@ export const fractalEngine = wgslFn(`
       let k = scale / r2;
       z = z * k;
       scaleFactor = scaleFactor * k;
+      orbitTrap = min(orbitTrap, r2);
     }
-    return 0.25 * abs(z.y) / scaleFactor;
+    return vec2<f32>(0.25 * abs(z.y) / scaleFactor, clamp(orbitTrap, 0.0, 1.0));
   }
 
   /**
-   * Master Distance Estimator
+   * Master Distance and Data Estimator
    */
-  fn getFractalDistance(
+  fn getFractalData(
     point: vec3<f32>,
     fractalType: i32,
     params: vec4<f32>,
@@ -294,36 +362,33 @@ export const fractalEngine = wgslFn(`
     uInteractionType: i32,
     uAdaptiveIterations: f32,
     uAdaptiveSettledIterations: f32
-  ) -> f32 {
-    var dist: f32 = 10.0;
-    
-    // Calculate the iteration limit by blending between the interactive and settled adaptive counts.
-    // We also add a small LOD boost based on zoom level for the settled state.
+  ) -> vec2<f32> {
+    var data: vec2<f32> = vec2<f32>(10.0, 0.0);
     
     if (fractalType == 0) {
       let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.5;
       let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
-      dist = getMandelbulbDistance(point, params.y, iter);
+      data = getMandelbulbData(point, params.y, iter);
     } else if (fractalType == 1) {
       let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.3;
       let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
-      dist = getMengerSpongeDistance(point, params.y, iter);
+      data = getMengerSpongeData(point, params.y, iter);
     } else if (fractalType == 2) {
       let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.8;
       let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
-      dist = getJuliaDistance(point, vec3<f32>(params.z, params.w, 0.1), iter);
+      data = getJuliaData(point, vec3<f32>(params.z, params.w, 0.1), iter);
     } else if (fractalType == 3) {
       let settledLimit = uAdaptiveSettledIterations + zoomLOD;
       let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
-      dist = getSierpinskiDistance(point, params.y, iter);
+      data = getSierpinskiData(point, params.y, iter);
     } else if (fractalType == 4) {
       let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.4;
       let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
-      dist = getMandelboxDistance(point, params.y, params.z, params.w, iter);
+      data = getMandelboxData(point, params.y, params.z, params.w, iter);
     } else if (fractalType == 5) {
       let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.5;
       let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
-      dist = getApollonianDistance(point, params.y, iter);
+      data = getApollonianData(point, params.y, iter);
     }
 
     if (slicerEnabled > 0.5) {
@@ -331,9 +396,9 @@ export const fractalEngine = wgslFn(`
       if (slicerAxis == 0) { planeDist = point.x - slicerOffset; }
       else if (slicerAxis == 1) { planeDist = point.y - slicerOffset; }
       else if (slicerAxis == 2) { planeDist = point.z - slicerOffset; }
-      dist = max(dist, -planeDist);
+      data.x = max(data.x, -planeDist);
     }
     
-    return dist;
+    return data;
   }
 `);

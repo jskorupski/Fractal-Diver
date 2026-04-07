@@ -82,4 +82,36 @@ describe('App Component', () => {
     // Check if the value is updated in the UI
     expect(screen.getByText('+5')).toBeInTheDocument();
   });
+
+  it('updates opacity when a parameter is being dragged', () => {
+    render(<App />);
+    // Open settings panel
+    fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+    
+    const qualitySlider = screen.getByLabelText(/Quality/i);
+    
+    // Start dragging
+    fireEvent.mouseDown(qualitySlider);
+    
+    // The settings panel should have full opacity because it's the active param
+    const settingsPanel = screen.getByTestId('parameters-panel');
+    expect(settingsPanel).toHaveClass('opacity-100');
+    
+    // The main controls group should have reduced opacity
+    const mainControls = screen.getByTestId('main-controls-group');
+    expect(mainControls).toHaveClass('opacity-20');
+    
+    // Stop dragging
+    fireEvent.mouseUp(qualitySlider);
+    expect(mainControls).toHaveClass('opacity-100');
+  });
+
+  it('verifies default fractal parameters are rendered', () => {
+    render(<App />);
+    // Open settings panel
+    fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+    
+    // Mandelbulb is default, power should be 8.00
+    expect(screen.getByText('8.00')).toBeInTheDocument();
+  });
 });

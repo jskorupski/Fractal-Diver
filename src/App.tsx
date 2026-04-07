@@ -56,6 +56,7 @@ export default function App() {
 
   // Parameters panel state
   const [paramsEnabled, setParamsEnabled] = useState<boolean>(false);
+  const [draggingParam, setDraggingParam] = useState<string | null>(null);
   const [slicerExpanded, setSlicerExpanded] = useState<boolean>(() => {
     const config = FRACTAL_CONFIGS["0"];
     return !config?.slicer.enabled;
@@ -92,7 +93,10 @@ export default function App() {
   // Throttling refs for state updates
   const lastAdaptiveUpdateRef = useRef<number>(0);
   const lastSettledAdaptiveUpdateRef = useRef<number>(0);
+  const interactionStartTimeRef = useRef<number>(0);
   const smoothedDeltaRef = useRef<Record<number, number>>({});
+  const lastActualMoveTimeRef = useRef<number>(0);
+  const lastViewUpdateRef = useRef<number>(0);
 
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -226,9 +230,18 @@ export default function App() {
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       
+      const now = performance.now();
+      lastActualMoveTimeRef.current = now;
+      
       setIsInteracting(true);
       setInteractionType(2); // Zoom
       setSettleTime(0);
+      
+      // Throttle camera state updates to ~60fps
+      if (now - lastViewUpdateRef.current < 16) return;
+      lastViewUpdateRef.current = now;
+
+      interactionStartTimeRef.current = now;
 
       // Clear existing timeout
       if (wheelTimeoutRef.current) {
@@ -276,6 +289,8 @@ export default function App() {
   const handleTouchStart = (e: ReactTouchEvent) => {
     setIsInteracting(true);
     setSettleTime(0);
+    interactionStartTimeRef.current = performance.now();
+    
     if (e.touches.length === 1) {
       // Single touch: track position for rotation
       setInteractionType(1); // Pan/Rotate
@@ -304,6 +319,7 @@ export default function App() {
     setIsInteracting(true);
     setInteractionType(1); // Pan/Rotate
     setSettleTime(0);
+    interactionStartTimeRef.current = performance.now();
     lastTouchRef.current = { x: e.clientX, y: e.clientY };
   };
 
@@ -314,6 +330,13 @@ export default function App() {
    */
   const handleMouseMove = (e: ReactMouseEvent) => {
     if (isInteracting && lastTouchRef.current && !('touches' in e)) {
+      const now = performance.now();
+      lastActualMoveTimeRef.current = now;
+      
+      // Throttle camera state updates to ~60fps to prevent main thread saturation
+      if (now - lastViewUpdateRef.current < 16) return;
+      lastViewUpdateRef.current = now;
+
       const dx = e.clientX - lastTouchRef.current.x;
       const dy = e.clientY - lastTouchRef.current.y;
 
@@ -324,7 +347,9 @@ export default function App() {
           // Shift + Drag: Panning
           // Panning sensitivity scales inversely with zoom relative to the fractal's default scale.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
-          const panSensitivity = 0.0012 * (defaultConfig.zoom / current.zoom);
+          // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
+          const baseSensitivity = fractalType === 2 ? 0.005 : 0.0012;
+          const panSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
           
           // Calculate camera-relative right and up vectors
           const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
@@ -343,7 +368,9 @@ export default function App() {
           // Normal Drag: Rotation
           // Rotation sensitivity also scales with zoom to allow for finer control at high zoom levels.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
-          const rotSensitivity = 0.003 * (defaultConfig.zoom / current.zoom);
+          // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
+          const baseSensitivity = fractalType === 2 ? 0.012 : 0.003;
+          const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
           
           // Calculate camera-relative rotation
           const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
@@ -380,7 +407,14 @@ export default function App() {
    * Implements rotation logic with sensitivity dampening based on zoom level.
    */
   const handleTouchMove = (e: ReactTouchEvent) => {
+    const now = performance.now();
+    lastActualMoveTimeRef.current = now;
+
     if (e.touches.length === 1 && lastTouchRef.current) {
+      // Throttle camera state updates to ~60fps
+      if (now - lastViewUpdateRef.current < 16) return;
+      lastViewUpdateRef.current = now;
+
       // Single finger: Rotation
       const touch = e.touches[0];
       const dx = touch.clientX - lastTouchRef.current.x;
@@ -389,7 +423,9 @@ export default function App() {
       setFractalViews(prev => {
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
-        const rotSensitivity = 0.003 * (defaultConfig.zoom / current.zoom);
+        // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
+        const baseSensitivity = fractalType === 2 ? 0.012 : 0.003;
+        const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
         
         const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
         const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity);
@@ -406,6 +442,10 @@ export default function App() {
 
       lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
     } else if (e.touches.length === 2 && lastPinchDistRef.current) {
+      // Throttle camera state updates to ~60fps
+      if (now - lastViewUpdateRef.current < 16) return;
+      lastViewUpdateRef.current = now;
+
       // Two fingers: Pinch-to-zoom
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -426,6 +466,10 @@ export default function App() {
 
       lastPinchDistRef.current = dist;
     } else if (e.touches.length === 3 && lastTouchRef.current) {
+      // Throttle camera state updates to ~60fps
+      if (now - lastViewUpdateRef.current < 16) return;
+      lastViewUpdateRef.current = now;
+
       // Three fingers: Panning
       const avgX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
       const avgY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
@@ -436,7 +480,9 @@ export default function App() {
       setFractalViews(prev => {
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
-        const panSensitivity = 0.0012 * (defaultConfig.zoom / current.zoom);
+        // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
+        const baseSensitivity = fractalType === 2 ? 0.005 : 0.0012;
+        const panSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
         
         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
         const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
@@ -493,7 +539,16 @@ export default function App() {
       // Interactive mode: target 30fps for smooth navigation
       const targetFrameTime = 1 / 30; // 33.3ms
       
-      // Normalize delta to ignore the user's quality offset impact
+      // Calculate how long we've been interacting to adjust aggressiveness.
+      // We want the iteration count to snap quickly to the target FPS when interaction starts,
+      // then settle into a smoother adjustment phase.
+      const interactionDuration = now - interactionStartTimeRef.current;
+      
+      // Aggressiveness starts high (8.0) and decays exponentially to 1.0 over ~1 second.
+      const aggressiveness = Math.max(1.0, 8.0 * Math.exp(-interactionDuration / 1000));
+      
+      // Normalize delta to ignore the user's quality offset impact.
+      // This ensures the adaptive logic targets the base performance of the device.
       const currentBase = adaptiveIterations[fractalType];
       const totalIter = Math.max(1, currentBase + userOffset);
       const normalizedDelta = smoothedDelta * (currentBase / totalIter);
@@ -502,18 +557,25 @@ export default function App() {
         const current = prev[fractalType];
         let nextIter = current;
         
-        if (normalizedDelta > targetFrameTime * 1.1) {
-          // Too slow, decrease interactive iterations
-          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 0.5);
+        if (normalizedDelta > targetFrameTime * 1.5) {
+          // Very slow: drop iterations even more aggressively to recover frame rate immediately
+          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 2.5 * aggressiveness);
+        } else if (normalizedDelta > targetFrameTime * 1.1) {
+          // Too slow: decrease iterations aggressively at the start of interaction.
+          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 0.8 * aggressiveness);
         } else if (normalizedDelta < targetFrameTime * 0.9) {
-          // Fast enough, increase interactive iterations
-          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.2);
+          // Fast enough: increase iterations to improve quality.
+          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.3 * aggressiveness);
         }
         
         if (nextIter === current) return prev;
         
-        // Throttle state updates to ~10fps to avoid React overhead
-        if (now - lastAdaptiveUpdateRef.current < 100) return prev;
+        // Throttle state updates to prevent React re-render overhead from becoming the bottleneck.
+        // While actively moving, we keep the throttle low (16ms) to ensure the shader responds.
+        const isActuallyMoving = now - lastActualMoveTimeRef.current < 100;
+        const throttleTime = isActuallyMoving ? 16 : Math.max(16, Math.min(100, interactionDuration / 10));
+        
+        if (now - lastAdaptiveUpdateRef.current < throttleTime) return prev;
         lastAdaptiveUpdateRef.current = now;
         
         return { ...prev, [fractalType]: nextIter };
@@ -558,7 +620,7 @@ export default function App() {
       ref={containerRef}
     >
       {/* Branding & Navigation Overlay */}
-      <div className="absolute top-4 left-4 sm:top-8 sm:left-8 z-10 flex flex-col gap-1.5 pointer-events-none">
+      <div className={`absolute top-4 left-4 sm:top-8 sm:left-8 z-10 flex flex-col gap-1.5 pointer-events-none transition-opacity duration-500 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
         <h1 className="text-cyan-400 font-mono font-bold uppercase tracking-[0.4em] text-xs sm:text-base drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
           Fractal Diver
         </h1>
@@ -603,10 +665,16 @@ export default function App() {
       />
 
       {/* UI Controls Overlay - Futuristic Styling */}
-      <div className={`absolute bottom-8 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-10 flex flex-col items-end gap-3 max-w-full sm:max-w-[400px] transition-opacity duration-300 ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+      <div 
+        data-testid="ui-controls-overlay"
+        className={`absolute bottom-8 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-10 flex flex-col items-end gap-3 max-w-full sm:max-w-[400px] transition-opacity duration-300 ${isDragging && !draggingParam ? 'opacity-20' : 'opacity-100'}`}
+      >
         
         {/* Main Controls Group */}
-        <div className="flex items-center gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.25)] w-full sm:w-auto overflow-x-auto no-scrollbar">
+        <div 
+          data-testid="main-controls-group"
+          className={`flex items-center gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.25)] w-full sm:w-auto overflow-x-auto no-scrollbar transition-opacity duration-300 ${draggingParam ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}
+        >
           
           {/* Fractal Selection Menu */}
           <Select 
@@ -676,7 +744,10 @@ export default function App() {
 
         {/* Fractal Parameters Panel */}
         {paramsEnabled && (
-          <div className={`w-full sm:w-80 p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity max-h-[40dvh] sm:max-h-[60dvh] overflow-y-auto ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+          <div 
+            data-testid="parameters-panel"
+            className={`w-full sm:w-80 p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity max-h-[40dvh] sm:max-h-[60dvh] overflow-y-auto ${isDragging && !draggingParam ? 'opacity-20' : 'opacity-100'}`}
+          >
             <div className="flex flex-col gap-4 sm:gap-5">
               <div className="flex items-center gap-2 border-b border-cyan-500/20 pb-3">
                 <Settings2 className="w-3 h-3 text-cyan-500" />
@@ -684,7 +755,7 @@ export default function App() {
               </div>
 
               {/* Quality Offset Slider */}
-              <div className="flex flex-col gap-2">
+              <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'quality' ? 'opacity-20' : 'opacity-100'}`}>
                 <div className="flex justify-between items-center">
                   <span className="text-[9px] font-mono uppercase text-cyan-500/60">Render Quality</span>
                   <span className="text-[10px] font-mono text-cyan-400">
@@ -700,10 +771,10 @@ export default function App() {
                     max="10" 
                     step="1"
                     value={parameters.qualityOffset}
-                    onMouseDown={() => setIsDragging(true)}
-                    onMouseUp={() => setIsDragging(false)}
-                    onTouchStart={() => setIsDragging(true)}
-                    onTouchEnd={() => setIsDragging(false)}
+                    onMouseDown={() => { setIsDragging(true); setDraggingParam('quality'); }}
+                    onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
+                    onTouchStart={() => { setIsDragging(true); setDraggingParam('quality'); }}
+                    onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
                     onChange={(e) => updateCurrentView({ parameters: { qualityOffset: parseInt(e.target.value) } })}
                     className="flex-1 h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
                   />
@@ -713,7 +784,7 @@ export default function App() {
 
               {/* Dynamic Parameter 1 */}
               {fractalType !== 2 && ( // Julia uses p2, p3
-                <div className="flex flex-col gap-2">
+                <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'p1' ? 'opacity-20' : 'opacity-100'}`}>
                   <div className="flex justify-between items-center">
                     <span className="text-[9px] font-mono uppercase text-cyan-500/60">
                       {fractalType === 0 ? 'Power' : (fractalType === 1 || fractalType === 3 || fractalType === 4) ? 'Scale' : 'Param 1'}
@@ -726,10 +797,10 @@ export default function App() {
                     max={fractalType === 0 ? "20" : (fractalType === 1 ? "12" : "5")} 
                     step="0.01"
                     value={parameters.p1}
-                    onMouseDown={() => setIsDragging(true)}
-                    onMouseUp={() => setIsDragging(false)}
-                    onTouchStart={() => setIsDragging(true)}
-                    onTouchEnd={() => setIsDragging(false)}
+                    onMouseDown={() => { setIsDragging(true); setDraggingParam('p1'); }}
+                    onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
+                    onTouchStart={() => { setIsDragging(true); setDraggingParam('p1'); }}
+                    onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
                     onChange={(e) => updateCurrentView({ parameters: { p1: parseFloat(e.target.value) } })}
                     className="w-full h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
                   />
@@ -739,7 +810,7 @@ export default function App() {
               {/* Dynamic Parameter 2 & 3 (Julia C or Mandelbox Radius) */}
               {(fractalType === 2 || fractalType === 4) && (
                 <>
-                  <div className="flex flex-col gap-2">
+                  <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'p2' ? 'opacity-20' : 'opacity-100'}`}>
                     <div className="flex justify-between items-center">
                       <span className="text-[9px] font-mono uppercase text-cyan-500/60">
                         {fractalType === 2 ? 'C Real' : 'Min Radius'}
@@ -752,15 +823,15 @@ export default function App() {
                       max={fractalType === 2 ? "2" : "2"} 
                       step="0.001"
                       value={parameters.p2}
-                      onMouseDown={() => setIsDragging(true)}
-                      onMouseUp={() => setIsDragging(false)}
-                      onTouchStart={() => setIsDragging(true)}
-                      onTouchEnd={() => setIsDragging(false)}
+                      onMouseDown={() => { setIsDragging(true); setDraggingParam('p2'); }}
+                      onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
+                      onTouchStart={() => { setIsDragging(true); setDraggingParam('p2'); }}
+                      onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
                       onChange={(e) => updateCurrentView({ parameters: { p2: parseFloat(e.target.value) } })}
                       className="w-full h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
                     />
                   </div>
-                  <div className="flex flex-col gap-2">
+                  <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'p3' ? 'opacity-20' : 'opacity-100'}`}>
                     <div className="flex justify-between items-center">
                       <span className="text-[9px] font-mono uppercase text-cyan-500/60">
                         {fractalType === 2 ? 'C Imag' : 'Fixed Radius'}
@@ -773,10 +844,10 @@ export default function App() {
                       max={fractalType === 2 ? "2" : "3"} 
                       step="0.001"
                       value={parameters.p3}
-                      onMouseDown={() => setIsDragging(true)}
-                      onMouseUp={() => setIsDragging(false)}
-                      onTouchStart={() => setIsDragging(true)}
-                      onTouchEnd={() => setIsDragging(false)}
+                      onMouseDown={() => { setIsDragging(true); setDraggingParam('p3'); }}
+                      onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
+                      onTouchStart={() => { setIsDragging(true); setDraggingParam('p3'); }}
+                      onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
                       onChange={(e) => updateCurrentView({ parameters: { p3: parseFloat(e.target.value) } })}
                       className="w-full h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
                     />
@@ -789,7 +860,7 @@ export default function App() {
 
         {/* Advanced Slicer Panel */}
         {slicer.enabled && (
-          <div className={`w-full sm:w-72 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden transition-opacity max-h-[30vh] sm:max-h-[40vh] overflow-y-auto ${isDragging ? 'opacity-20' : 'opacity-100'}`}>
+          <div className={`w-full sm:w-72 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden transition-opacity max-h-[30vh] sm:max-h-[40vh] overflow-y-auto ${isDragging && draggingParam !== 'slicer' ? 'opacity-20' : 'opacity-100'}`}>
             <div 
               className="flex items-center justify-between px-5 py-3 border-b border-cyan-500/10 cursor-pointer hover:bg-cyan-500/5 transition-colors"
               onClick={() => setSlicerExpanded(!slicerExpanded)}
@@ -841,10 +912,10 @@ export default function App() {
                       max="2" 
                       step="0.01"
                       value={slicer.offset}
-                      onMouseDown={() => setIsDragging(true)}
-                      onMouseUp={() => setIsDragging(false)}
-                      onTouchStart={() => setIsDragging(true)}
-                      onTouchEnd={() => setIsDragging(false)}
+                      onMouseDown={() => { setIsDragging(true); setDraggingParam('slicer'); }}
+                      onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
+                      onTouchStart={() => { setIsDragging(true); setDraggingParam('slicer'); }}
+                      onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
                       onChange={(e) => updateCurrentView({ slicer: { offset: parseFloat(e.target.value) } })}
                       className="w-full h-2 bg-transparent appearance-none cursor-pointer accent-cyan-400 relative z-10"
                     />
