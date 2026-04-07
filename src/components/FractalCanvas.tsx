@@ -229,7 +229,10 @@ interface FractalCanvasProps {
 export default function FractalCanvas(props: FractalCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WebGPURenderer | null>(null);
+  const rootRef = useRef<any>(null);
   const [root, setRoot] = useState<any>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [statusMessage, setStatusMessage] = useState("INITIALIZING WEBGPU...");
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -241,8 +244,28 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     rendererRef.current = r;
     
     let active = true;
+    
+    // Attempt to initialize the renderer
     r.init().then(() => {
       if (!active) return;
+      
+      // Handle WebGPU device loss
+      // The backend device lost promise resolves when the GPU device is lost
+      // (e.g., due to driver crash, system sleep, or page visibility changes)
+      // @ts-ignore - backend property access
+      const device = r.backend?.device;
+      if (device) {
+        device.lost.then((info: any) => {
+          console.warn(`WebGPU Device Lost: ${info.message}. Reason: ${info.reason}. Restarting renderer...`);
+          if (active) {
+            setStatusMessage("WEBGPU DEVICE LOST. RESTARTING...");
+            // Delay slightly before retrying to avoid tight loops
+            setTimeout(() => {
+              if (active) setRetryCount(c => c + 1);
+            }, 1000);
+          }
+        });
+      }
       
       const r3fRoot = createRoot(canvas);
       r3fRoot.configure({
@@ -253,18 +276,30 @@ export default function FractalCanvas(props: FractalCanvasProps) {
         size: { width: canvas.clientWidth, height: canvas.clientHeight, top: 0, left: 0 }
       });
       
+      rootRef.current = r3fRoot;
       setRoot(r3fRoot);
     }).catch(err => {
       console.error("WebGPU Initialization Failed:", err);
+      setStatusMessage("WEBGPU INITIALIZATION FAILED. RETRYING...");
+      // Retry after a longer delay if initialization failed completely
+      setTimeout(() => {
+        if (active) setRetryCount(c => c + 1);
+      }, 3000);
     });
 
     return () => {
       active = false;
-      if (root) {
-        root.unmount();
+      if (rootRef.current) {
+        rootRef.current.unmount();
+        rootRef.current = null;
       }
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+        rendererRef.current = null;
+      }
+      setRoot(null);
     };
-  }, []);
+  }, [retryCount]);
 
   // Handle resizing
   useEffect(() => {
@@ -311,8 +346,8 @@ export default function FractalCanvas(props: FractalCanvasProps) {
         onMouseLeave={props.onMouseLeave}
       />
       {!root && (
-        <div className="absolute inset-0 flex items-center justify-center text-white/50 text-sm font-mono tracking-widest animate-pulse">
-          INITIALIZING WEBGPU...
+        <div className="absolute inset-0 flex items-center justify-center text-white/50 text-sm font-mono tracking-widest animate-pulse text-center px-4">
+          {statusMessage}
         </div>
       )}
     </div>

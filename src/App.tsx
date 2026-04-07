@@ -67,6 +67,11 @@ export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
   const lastPinchDistRef = useRef<number | null>(null);
+  
+  // Gesture mode for multi-touch (0: none, 1: zoom, 2: pan)
+  const gestureModeRef = useRef<number>(0);
+  const pinchStartDistRef = useRef<number>(0);
+  const panStartMidpointRef = useRef<{ x: number; y: number } | null>(null);
 
   // Interaction and visibility states
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
@@ -97,6 +102,7 @@ export default function App() {
   const smoothedDeltaRef = useRef<Record<number, number>>({});
   const lastActualMoveTimeRef = useRef<number>(0);
   const lastViewUpdateRef = useRef<number>(0);
+  const sampleCountRef = useRef<Record<number, number>>({});
 
   const [settleTime, setSettleTime] = useState<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
@@ -233,15 +239,11 @@ export default function App() {
       const now = performance.now();
       lastActualMoveTimeRef.current = now;
       
-      setIsInteracting(true);
-      setInteractionType(2); // Zoom
-      setSettleTime(0);
+      startInteraction(2); // Zoom
       
       // Throttle camera state updates to ~60fps
       if (now - lastViewUpdateRef.current < 16) return;
       lastViewUpdateRef.current = now;
-
-      interactionStartTimeRef.current = now;
 
       // Clear existing timeout
       if (wheelTimeoutRef.current) {
@@ -283,31 +285,49 @@ export default function App() {
   // --- Interaction Handlers ---
 
   /**
+   * Initializes interaction state for any input method (mouse, touch, wheel).
+   * Resets adaptive iteration counters and gesture tracking.
+   * @param type The type of interaction (1: Pan/Rotate, 2: Zoom/Pan)
+   */
+  const startInteraction = (type: number) => {
+    setIsInteracting(true);
+    setInteractionType(type);
+    setSettleTime(0);
+    interactionStartTimeRef.current = performance.now();
+    
+    // Reset sample counts for the adaptive iteration PID-like logic
+    // This ensures we start fresh with each new interaction.
+    sampleCountRef.current = {}; 
+    
+    // Reset multi-touch gesture tracking
+    gestureModeRef.current = 0; // 0: none, 1: zoom, 2: pan
+    
+    // Reset view update throttle to allow immediate response for new interaction
+    lastViewUpdateRef.current = 0;
+  };
+
+  /**
    * Handles the start of a touch interaction.
    * Supports both single-touch (rotation/panning) and multi-touch (pinching for zoom).
    */
   const handleTouchStart = (e: ReactTouchEvent) => {
-    setIsInteracting(true);
-    setSettleTime(0);
-    interactionStartTimeRef.current = performance.now();
-    
     if (e.touches.length === 1) {
       // Single touch: track position for rotation
-      setInteractionType(1); // Pan/Rotate
+      startInteraction(1); // Pan/Rotate
       lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
-      // Multi-touch: track distance for pinch-to-zoom
-      setInteractionType(2); // Zoom
+      // Multi-touch: track distance for pinch-to-zoom AND midpoint for panning
+      startInteraction(2); // Zoom/Pan
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
-      lastPinchDistRef.current = Math.sqrt(dx * dx + dy * dy);
-    } else if (e.touches.length === 3) {
-      // Three-finger touch: track position for panning
-      setInteractionType(1); // Pan/Rotate
-      // Use the average position of the three fingers
-      const avgX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
-      const avgY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      lastPinchDistRef.current = dist;
+      pinchStartDistRef.current = dist;
+      
+      const avgX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const avgY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       lastTouchRef.current = { x: avgX, y: avgY };
+      panStartMidpointRef.current = { x: avgX, y: avgY };
     }
   };
 
@@ -316,10 +336,7 @@ export default function App() {
    * Resets settle time to trigger interactive (low-detail) rendering.
    */
   const handleMouseDown = (e: ReactMouseEvent) => {
-    setIsInteracting(true);
-    setInteractionType(1); // Pan/Rotate
-    setSettleTime(0);
-    interactionStartTimeRef.current = performance.now();
+    startInteraction(1); // Pan/Rotate
     lastTouchRef.current = { x: e.clientX, y: e.clientY };
   };
 
@@ -372,9 +389,14 @@ export default function App() {
           const baseSensitivity = fractalType === 2 ? 0.012 : 0.003;
           const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
           
+          // To prevent "reversed" rotation when the camera is upside down, we check the current up vector.
+          // If the camera is upside down (looking from the bottom), horizontal drag should be inverted.
+          const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
+          const horizontalDirection = upVector.y < 0 ? -1 : 1;
+          
           // Calculate camera-relative rotation
           const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
-          const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity);
+          const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity * horizontalDirection);
           
           // Apply rotations: Y is applied globally (turntable), X is applied locally
           const nextRotation = current.rotation.clone().multiply(deltaRotX).premultiply(deltaRotY);
@@ -427,8 +449,13 @@ export default function App() {
         const baseSensitivity = fractalType === 2 ? 0.012 : 0.003;
         const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
         
+        // To prevent "reversed" rotation when the camera is upside down, we check the current up vector.
+        // If the camera is upside down (looking from the bottom), horizontal drag should be inverted.
+        const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
+        const horizontalDirection = upVector.y < 0 ? -1 : 1;
+        
         const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
-        const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity);
+        const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity * horizontalDirection);
         const nextRotation = current.rotation.clone().multiply(deltaRotX).premultiply(deltaRotY);
         
         return {
@@ -441,62 +468,73 @@ export default function App() {
       });
 
       lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
-    } else if (e.touches.length === 2 && lastPinchDistRef.current) {
+    } else if (e.touches.length === 2 && lastPinchDistRef.current && lastTouchRef.current) {
       // Throttle camera state updates to ~60fps
       if (now - lastViewUpdateRef.current < 16) return;
       lastViewUpdateRef.current = now;
-
-      // Two fingers: Pinch-to-zoom
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const delta = dist / lastPinchDistRef.current;
+      
+      const avgX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const avgY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      
+      const deltaZoom = dist / lastPinchDistRef.current;
+      const deltaX = avgX - lastTouchRef.current.x;
+      const deltaY = avgY - lastTouchRef.current.y;
+
+      // Detect gesture type if not already locked
+      if (gestureModeRef.current === 0) {
+        const pinchDelta = Math.abs(dist - pinchStartDistRef.current);
+        const panDeltaX = avgX - (panStartMidpointRef.current?.x || avgX);
+        const panDeltaY = avgY - (panStartMidpointRef.current?.y || avgY);
+        const panDist = Math.sqrt(panDeltaX * panDeltaX + panDeltaY * panDeltaY);
+
+        // Thresholds for gesture detection (in pixels)
+        const PINCH_THRESHOLD = 15;
+        const PAN_THRESHOLD = 10;
+
+        if (pinchDelta > PINCH_THRESHOLD && pinchDelta > panDist) {
+          gestureModeRef.current = 1; // Zoom
+        } else if (panDist > PAN_THRESHOLD && panDist > pinchDelta) {
+          gestureModeRef.current = 2; // Pan
+        }
+      }
 
       setFractalViews(prev => {
         const current = prev[fractalType];
-        const nextZoom = current.zoom * delta;
+        const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
+        
+        let nextZoom = current.zoom;
+        let nextOffset = current.offset.clone();
+
+        if (gestureModeRef.current === 1) {
+          // Locked to Zoom
+          nextZoom = current.zoom * deltaZoom;
+        } else if (gestureModeRef.current === 2) {
+          // Locked to Pan
+          const basePanSensitivity = fractalType === 2 ? 0.005 : 0.0012;
+          const panSensitivity = basePanSensitivity * (defaultConfig.zoom / current.zoom);
+          
+          // Calculate camera-relative right and up vectors
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
+          const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
+          
+          const deltaPan = right.multiplyScalar(-deltaX * panSensitivity).add(up.multiplyScalar(deltaY * panSensitivity));
+          nextOffset.add(deltaPan);
+        }
+        
         return {
           ...prev,
           [fractalType]: {
             ...current,
-            zoom: Math.max(0.0001, Math.min(100.0, nextZoom))
+            zoom: Math.max(0.0001, Math.min(100.0, nextZoom)),
+            offset: nextOffset
           }
         };
       });
 
       lastPinchDistRef.current = dist;
-    } else if (e.touches.length === 3 && lastTouchRef.current) {
-      // Throttle camera state updates to ~60fps
-      if (now - lastViewUpdateRef.current < 16) return;
-      lastViewUpdateRef.current = now;
-
-      // Three fingers: Panning
-      const avgX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
-      const avgY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
-      
-      const dx = avgX - lastTouchRef.current.x;
-      const dy = avgY - lastTouchRef.current.y;
-
-      setFractalViews(prev => {
-        const current = prev[fractalType];
-        const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
-        // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
-        const baseSensitivity = fractalType === 2 ? 0.005 : 0.0012;
-        const panSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
-        
-        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
-        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
-        const deltaPan = right.multiplyScalar(-dx * panSensitivity).add(up.multiplyScalar(dy * panSensitivity));
-        
-        return {
-          ...prev,
-          [fractalType]: {
-            ...current,
-            offset: current.offset.clone().add(deltaPan)
-          }
-        };
-      });
-
       lastTouchRef.current = { x: avgX, y: avgY };
     }
   };
@@ -530,25 +568,29 @@ export default function App() {
     // Exponential smoothing for frame delta to prevent "popping"
     // We use a faster smoothing factor for interactive mode to respond quickly to lag,
     // and a slower one for settled mode to keep the quality stable.
-    const smoothingFactor = isInteracting ? 0.2 : 0.05;
+    // Adaptive smoothing: as the interaction continues, we increase smoothing (lower factor) to stabilize.
+    const interactionDuration = now - interactionStartTimeRef.current;
+    const baseSmoothing = isInteracting ? 0.25 : 0.08;
+    const smoothingFactor = isInteracting 
+      ? Math.max(0.05, baseSmoothing * Math.exp(-interactionDuration / 2000)) 
+      : baseSmoothing;
+    
     const prevSmoothed = smoothedDeltaRef.current[fractalType] ?? delta;
     const smoothedDelta = prevSmoothed * (1 - smoothingFactor) + delta * smoothingFactor;
     smoothedDeltaRef.current[fractalType] = smoothedDelta;
+
+    // Track sample count to ensure we have enough data before making a change
+    sampleCountRef.current[fractalType] = (sampleCountRef.current[fractalType] ?? 0) + 1;
+    const minSamples = isInteracting ? 5 : 15;
 
     if (isInteracting) {
       // Interactive mode: target 30fps for smooth navigation
       const targetFrameTime = 1 / 30; // 33.3ms
       
-      // Calculate how long we've been interacting to adjust aggressiveness.
-      // We want the iteration count to snap quickly to the target FPS when interaction starts,
-      // then settle into a smoother adjustment phase.
-      const interactionDuration = now - interactionStartTimeRef.current;
-      
       // Aggressiveness starts high (8.0) and decays exponentially to 1.0 over ~1 second.
       const aggressiveness = Math.max(1.0, 8.0 * Math.exp(-interactionDuration / 1000));
       
       // Normalize delta to ignore the user's quality offset impact.
-      // This ensures the adaptive logic targets the base performance of the device.
       const currentBase = adaptiveIterations[fractalType];
       const totalIter = Math.max(1, currentBase + userOffset);
       const normalizedDelta = smoothedDelta * (currentBase / totalIter);
@@ -557,21 +599,24 @@ export default function App() {
         const current = prev[fractalType];
         let nextIter = current;
         
+        // Hysteresis / Deadband logic:
+        // We use a wider deadband to prevent "bouncing" between iteration counts.
+        // Decrease if > 1.2x target, Increase if < 0.75x target.
         if (normalizedDelta > targetFrameTime * 1.5) {
-          // Very slow: drop iterations even more aggressively to recover frame rate immediately
-          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 2.5 * aggressiveness);
-        } else if (normalizedDelta > targetFrameTime * 1.1) {
-          // Too slow: decrease iterations aggressively at the start of interaction.
-          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 0.8 * aggressiveness);
-        } else if (normalizedDelta < targetFrameTime * 0.9) {
+          // Critical lag: drop iterations very aggressively
+          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 3.0 * aggressiveness);
+        } else if (normalizedDelta > targetFrameTime * 1.2) {
+          // Too slow: decrease iterations
+          nextIter = Math.max(currentConfig.minInteractiveIterations, nextIter - 1.0 * aggressiveness);
+        } else if (normalizedDelta < targetFrameTime * 0.75) {
           // Fast enough: increase iterations to improve quality.
-          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.3 * aggressiveness);
+          // We use a smaller step for increasing to avoid immediate frame drops.
+          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.25 * aggressiveness);
         }
         
-        if (nextIter === current) return prev;
+        if (nextIter === current || sampleCountRef.current[fractalType] < minSamples) return prev;
         
         // Throttle state updates to prevent React re-render overhead from becoming the bottleneck.
-        // While actively moving, we keep the throttle low (16ms) to ensure the shader responds.
         const isActuallyMoving = now - lastActualMoveTimeRef.current < 100;
         const throttleTime = isActuallyMoving ? 16 : Math.max(16, Math.min(100, interactionDuration / 10));
         
@@ -593,15 +638,16 @@ export default function App() {
         const current = prev[fractalType];
         let nextIter = current;
         
-        if (normalizedDelta > targetFrameTime * 1.1) {
+        // Wider deadband for settled mode to keep the image stable
+        if (normalizedDelta > targetFrameTime * 1.25) {
           // Too slow, decrease settled iterations
-          nextIter = Math.max(currentConfig.minSettledIterations, nextIter - 1.0);
-        } else if (normalizedDelta < targetFrameTime * 0.9) {
+          nextIter = Math.max(currentConfig.minSettledIterations, nextIter - 1.5);
+        } else if (normalizedDelta < targetFrameTime * 0.7) {
           // Fast enough, increase settled iterations
-          nextIter = Math.min(currentConfig.maxSettledIterations, nextIter + 0.5);
+          nextIter = Math.min(currentConfig.maxSettledIterations, nextIter + 0.4);
         }
         
-        if (nextIter === current) return prev;
+        if (nextIter === current || sampleCountRef.current[fractalType] < minSamples) return prev;
         
         // Throttle state updates to ~5fps for settled mode as it's less critical
         if (now - lastSettledAdaptiveUpdateRef.current < 200) return prev;
@@ -627,7 +673,7 @@ export default function App() {
         <div className="h-[1px] w-12 bg-cyan-500/50" />
         <div className="flex flex-col gap-0.5">
           <div className="text-cyan-500/40 text-[8px] sm:text-[9px] uppercase font-mono tracking-[0.2em]">
-            Drag to Rotate • Shift+Drag to Pan
+            Drag to Rotate • 2-Finger Drag or Shift+Drag to Pan
           </div>
           <div className="text-cyan-500/40 text-[8px] sm:text-[9px] uppercase font-mono tracking-[0.2em]">
             Scroll or Pinch to Zoom
