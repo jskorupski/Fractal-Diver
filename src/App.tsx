@@ -592,7 +592,6 @@ export default function App() {
         settledSampleCountRef.current[fractalType] = 0;
         delete settledSmoothedDeltaRef.current[fractalType];
       }
-      return;
     }
 
     // Exponential smoothing for frame delta to prevent "popping"
@@ -610,7 +609,7 @@ export default function App() {
 
       // Track sample count
       interactiveSampleCountRef.current[fractalType] = (interactiveSampleCountRef.current[fractalType] ?? 0) + 1;
-      const minSamples = 5;
+      const minSamples = 3;
 
       // Interactive mode: target 30fps for smooth navigation
       // If struggling, target 15fps
@@ -623,7 +622,7 @@ export default function App() {
       const minBase = isLowEnd ? currentConfig.minInteractiveIterationsLowEnd : currentConfig.minInteractiveIterations;
       const currentZoom = fractalViewsRef.current[fractalType].zoom;
       const zoomFactor = Math.log2(Math.max(1, currentZoom));
-      const zoomMultiplier = isLowEnd ? 1.0 : 2.0;
+      const zoomMultiplier = isLowEnd ? 1.0 : 3.0;
       const dynamicMinIterations = Math.max(
         minBase,
         minBase + Math.min(24, zoomFactor * zoomMultiplier)
@@ -639,7 +638,7 @@ export default function App() {
       
       // Detect struggling: if normalizedDelta is consistently high, set isLowEnd
       if (normalizedDelta > targetFrameTime * 2.0) {
-        if (interactiveSampleCountRef.current[fractalType]! > 30) {
+        if (interactiveSampleCountRef.current[fractalType]! > 60) {
           if (!(isLowEndRef.current[fractalType] ?? false)) {
             isLowEndRef.current[fractalType] = true;
           }
@@ -664,7 +663,7 @@ export default function App() {
           nextIter = Math.max(dynamicMinIterations, nextIter - 0.5 * aggressiveness);
         } else if (normalizedDelta < targetFrameTime * 0.75) {
           // Fast enough: increase iterations to improve quality.
-          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.1 * aggressiveness);
+          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.2 * aggressiveness);
         }
         
         if (nextIter === current || interactiveSampleCountRef.current[fractalType] < minSamples) return prev;
