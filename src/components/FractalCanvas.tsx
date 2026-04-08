@@ -18,7 +18,7 @@ import {
   int
 } from 'three/tsl';
 
-import { fractalEngine } from '../shaders/fractalEngine';
+import { renderFractal } from '../shaders/fractalEngine';
 
 // Extend R3F with standard THREE objects
 extend({ Mesh, PlaneGeometry });
@@ -43,9 +43,9 @@ interface FractalMeshProps {
   slicerAxis: number;
   parameters: {
     qualityOffset: number;
-    p1: number;
-    p2: number;
-    p3: number;
+    param1: number;
+    param2: number;
+    param3: number;
   };
 }
 
@@ -84,20 +84,20 @@ function FractalMesh({
   const targetRotation = useMemo(() => rotation.clone(), [rotation]);
 
   const uniforms = useMemo(() => ({
-    uRes: uniform(new THREE.Vector2(size.width, size.height)),
-    uType: uniform(Math.floor(fractalType)),
-    uZoom: uniform(zoom),
-    uOff: uniform(offset.clone()),
-    uRot: uniform(new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current))),
-    uInteracting: uniform(isInteracting ? 1.0 : 0.0),
-    uInteractionType: uniform(Math.floor(interactionType)),
-    uAdaptiveIterations: uniform(adaptiveIterations),               // Uniform for interactive iteration limit
-    uAdaptiveSettledIterations: uniform(adaptiveSettledIterations), // Uniform for settled iteration limit
-    uSettleTime: uniform(settleTime),
-    uSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
-    uSlicerOffset: uniform(slicerOffset),
-    uSlicerAxis: uniform(Math.floor(slicerAxis)),
-    uParams: uniform(new THREE.Vector4(parameters.qualityOffset, parameters.p1, parameters.p2, parameters.p3))
+    uniformResolution: uniform(new THREE.Vector2(size.width, size.height)),
+    uniformType: uniform(Math.floor(fractalType)),
+    uniformZoom: uniform(zoom),
+    uniformOffset: uniform(offset.clone()),
+    uniformRotation: uniform(new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current))),
+    uniformInteracting: uniform(isInteracting ? 1.0 : 0.0),
+    uniformInteractionType: uniform(Math.floor(interactionType)),
+    uniformAdaptiveIterations: uniform(adaptiveIterations),
+    uniformAdaptiveSettledIterations: uniform(adaptiveSettledIterations),
+    uniformSettleTime: uniform(settleTime),
+    uniformSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
+    uniformSlicerOffset: uniform(slicerOffset),
+    uniformSlicerAxis: uniform(Math.floor(slicerAxis)),
+    uniformParameters: uniform(new THREE.Vector4(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3))
   }), []);
 
   // Force re-render when props change
@@ -108,7 +108,7 @@ function FractalMesh({
   }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, adaptiveIterations, adaptiveSettledIterations, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
 
   useEffect(() => {
-    uniforms.uRes.value.set(size.width, size.height);
+    uniforms.uniformResolution.value.set(size.width, size.height);
     invalidate();
   }, [size, uniforms, invalidate]);
 
@@ -132,20 +132,20 @@ function FractalMesh({
     smoothedRotation.current.slerp(targetRotation, lerpFactor);
     
     // Update uniforms
-    uniforms.uType.value = Math.floor(fractalType);
-    uniforms.uInteracting.value = isInteracting ? 1.0 : 0.0;
-    uniforms.uInteractionType.value = Math.floor(interactionType);
-    uniforms.uAdaptiveIterations.value = adaptiveIterations;
-    uniforms.uAdaptiveSettledIterations.value = adaptiveSettledIterations;
-    uniforms.uSettleTime.value = settleTime;
-    uniforms.uZoom.value = smoothedZoom.current;
-    uniforms.uOff.value.copy(smoothedOffset.current);
-    uniforms.uRot.value.setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current));
+    uniforms.uniformType.value = Math.floor(fractalType);
+    uniforms.uniformInteracting.value = isInteracting ? 1.0 : 0.0;
+    uniforms.uniformInteractionType.value = Math.floor(interactionType);
+    uniforms.uniformAdaptiveIterations.value = adaptiveIterations;
+    uniforms.uniformAdaptiveSettledIterations.value = adaptiveSettledIterations;
+    uniforms.uniformSettleTime.value = settleTime;
+    uniforms.uniformZoom.value = smoothedZoom.current;
+    uniforms.uniformOffset.value.copy(smoothedOffset.current);
+    uniforms.uniformRotation.value.setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current));
     
-    uniforms.uSlicerEnabled.value = slicerEnabled ? 1.0 : 0.0;
-    uniforms.uSlicerOffset.value = slicerOffset;
-    uniforms.uSlicerAxis.value = Math.floor(slicerAxis);
-    uniforms.uParams.value.set(parameters.qualityOffset, parameters.p1, parameters.p2, parameters.p3);
+    uniforms.uniformSlicerEnabled.value = slicerEnabled ? 1.0 : 0.0;
+    uniforms.uniformSlicerOffset.value = slicerOffset;
+    uniforms.uniformSlicerAxis.value = Math.floor(slicerAxis);
+    uniforms.uniformParameters.value.set(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3);
     
     // If we are still smoothing, keep invalidating
     const isStillSmoothing = 
@@ -160,22 +160,22 @@ function FractalMesh({
 
   const material = useMemo(() => {
     const mat = new MeshBasicNodeMaterial();
-    const colorNode = fractalEngine({
+    const colorNode = renderFractal({
       vUv: uv(),
-      uRes: uniforms.uRes,
-      uType: int(uniforms.uType),
-      uZoom: uniforms.uZoom,
-      uOff: uniforms.uOff,
-      uRot: uniforms.uRot,
-      uInteracting: uniforms.uInteracting,
-      uInteractionType: int(uniforms.uInteractionType),
-      uAdaptiveIterations: uniforms.uAdaptiveIterations,
-      uAdaptiveSettledIterations: uniforms.uAdaptiveSettledIterations,
-      uSettleTime: uniforms.uSettleTime,
-      uSlicerEnabled: uniforms.uSlicerEnabled,
-      uSlicerOffset: uniforms.uSlicerOffset,
-      uSlicerAxis: int(uniforms.uSlicerAxis),
-      uParams: uniforms.uParams
+      uniformResolution: uniforms.uniformResolution,
+      uniformType: int(uniforms.uniformType),
+      uniformZoom: uniforms.uniformZoom,
+      uniformOffset: uniforms.uniformOffset,
+      uniformRotation: uniforms.uniformRotation,
+      uniformInteracting: uniforms.uniformInteracting,
+      uniformInteractionType: int(uniforms.uniformInteractionType),
+      uniformAdaptiveIterations: uniforms.uniformAdaptiveIterations,
+      uniformAdaptiveSettledIterations: uniforms.uniformAdaptiveSettledIterations,
+      uniformSettleTime: uniforms.uniformSettleTime,
+      uniformSlicerEnabled: uniforms.uniformSlicerEnabled,
+      uniformSlicerOffset: uniforms.uniformSlicerOffset,
+      uniformSlicerAxis: int(uniforms.uniformSlicerAxis),
+      uniformParameters: uniforms.uniformParameters
     });
     mat.colorNode = colorNode as any;
     return mat;
@@ -199,9 +199,9 @@ interface FractalCanvasProps {
   rotation: THREE.Quaternion;
   parameters: {
     qualityOffset: number;
-    p1: number;
-    p2: number;
-    p3: number;
+    param1: number;
+    param2: number;
+    param3: number;
   };
   isInteracting: boolean;
   interactionType: number;

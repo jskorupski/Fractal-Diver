@@ -31,9 +31,9 @@ export default function App() {
     parameters: {
       qualityOffset: number;
       qualityStep: number;
-      p1: number;
-      p2: number;
-      p3: number;
+      param1: number;
+      param2: number;
+      param3: number;
     };
     slicer: {
       enabled: boolean;
@@ -130,7 +130,7 @@ export default function App() {
     zoom: number; 
     offset: THREE.Vector3; 
     rotation: THREE.Quaternion;
-    parameters: Partial<{ qualityOffset: number; qualityStep: number; p1: number; p2: number; p3: number }>;
+    parameters: Partial<{ qualityOffset: number; qualityStep: number; param1: number; param2: number; param3: number }>;
     slicer: Partial<{ enabled: boolean; offset: number; axis: number }>;
   }>) => {
     setFractalViews(prev => {
@@ -384,8 +384,7 @@ export default function App() {
           // Shift + Drag: Panning
           // Panning sensitivity scales inversely with zoom relative to the fractal's default scale.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
-          // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
-          const baseSensitivity = fractalType === 2 ? 0.005 : 0.0012;
+          const baseSensitivity = 0.0012 * defaultConfig.panSensitivityMultiplier;
           const panSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
           
           // Calculate camera-relative right and up vectors
@@ -405,8 +404,7 @@ export default function App() {
           // Normal Drag: Rotation
           // Rotation sensitivity also scales with zoom to allow for finer control at high zoom levels.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
-          // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
-          const baseSensitivity = fractalType === 2 ? 0.012 : 0.003;
+          const baseSensitivity = 0.003 * defaultConfig.rotSensitivityMultiplier;
           const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
           
           // To prevent "reversed" rotation when the camera is upside down, we check the current up vector.
@@ -465,7 +463,7 @@ export default function App() {
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
         // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
-        const baseSensitivity = fractalType === 2 ? 0.012 : 0.003;
+        const baseSensitivity = 0.012 * defaultConfig.rotSensitivityMultiplier;
         const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
         
         // To prevent "reversed" rotation when the camera is upside down, we check the current up vector.
@@ -532,7 +530,7 @@ export default function App() {
           nextZoom = current.zoom * deltaZoom;
         } else if (gestureModeRef.current === 2) {
           // Locked to Pan
-          const basePanSensitivity = fractalType === 2 ? 0.005 : 0.0012;
+          const basePanSensitivity = 0.0012 * defaultConfig.panSensitivityMultiplier;
           const panSensitivity = basePanSensitivity * (defaultConfig.zoom / current.zoom);
           
           // Calculate camera-relative right and up vectors
@@ -616,16 +614,19 @@ export default function App() {
 
       // Interactive mode: target 30fps for smooth navigation
       // If struggling, target 15fps
-      const targetFrameTime = (isLowEndRef.current[fractalType] ?? false) ? 1 / 15 : 1 / 30; // 66.6ms or 33.3ms
+      const isLowEnd = isLowEndRef.current[fractalType] ?? false;
+      const targetFrameTime = isLowEnd ? 1 / 15 : 1 / 30; // 66.6ms or 33.3ms
       
       // Calculate dynamic minimum iterations based on zoom level.
       // As we zoom in, we need more iterations to prevent "blobby" details.
-      const minBase = (isLowEndRef.current[fractalType] ?? false) ? currentConfig.minInteractiveIterationsLowEnd : currentConfig.minInteractiveIterations;
+      // We scale this more conservatively on low-end devices to maintain performance.
+      const minBase = isLowEnd ? currentConfig.minInteractiveIterationsLowEnd : currentConfig.minInteractiveIterations;
       const currentZoom = fractalViewsRef.current[fractalType].zoom;
       const zoomFactor = Math.log2(Math.max(1, currentZoom));
+      const zoomMultiplier = isLowEnd ? 1.0 : 2.0;
       const dynamicMinIterations = Math.max(
         minBase,
-        minBase + zoomFactor * 2
+        minBase + Math.min(24, zoomFactor * zoomMultiplier)
       );
       
       // Aggressiveness starts high (4.0) and decays exponentially to 1.0 over ~500ms.
@@ -688,7 +689,8 @@ export default function App() {
 
       // Settled mode: target 15fps for higher detail when static
       // If struggling, target 8fps
-      const targetFrameTime = (isLowEndRef.current[fractalType] ?? false) ? 1 / 8 : 1 / 15; // 125ms or 66.6ms
+      const isLowEnd = isLowEndRef.current[fractalType] ?? false;
+      const targetFrameTime = isLowEnd ? 1 / 8 : 1 / 15; // 125ms or 66.6ms
       
       // Normalize delta to ignore the user's quality offset impact
       const currentBase = adaptiveSettledIterations[fractalType];
@@ -696,12 +698,13 @@ export default function App() {
       const normalizedDelta = smoothedDelta * (currentBase / totalIter);
       
       // Calculate dynamic minimum iterations based on zoom level.
-      const minBase = (isLowEndRef.current[fractalType] ?? false) ? currentConfig.minSettledIterationsLowEnd : currentConfig.minSettledIterations;
+      const minBase = isLowEnd ? currentConfig.minSettledIterationsLowEnd : currentConfig.minSettledIterations;
       const currentZoom = fractalViewsRef.current[fractalType].zoom;
       const zoomFactor = Math.log2(Math.max(1, currentZoom));
+      const zoomMultiplier = isLowEnd ? 1.5 : 3.0;
       const dynamicMinIterations = Math.max(
         minBase,
-        minBase + zoomFactor * 4
+        minBase + Math.min(24, zoomFactor * zoomMultiplier)
       );
 
       // Only adapt settled iterations when we are actually settled (settleTime is high)
@@ -732,7 +735,25 @@ export default function App() {
     }
   }, [isInteracting, fractalType, parameters.qualityOffset, parameters.qualityStep, adaptiveIterations, adaptiveSettledIterations, settleTime, startInteraction, endInteraction]);
 
-  // --- Render ---
+  // --- Render Calculations ---
+
+  // Calculate safe minimum iterations for the current view to prevent blocky rendering
+  const currentZoom = fractalViews[fractalType].zoom;
+  const zoomFactor = Math.log2(Math.max(1, currentZoom));
+  const isLowEnd = isLowEndRef.current[fractalType] ?? false;
+  const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
+  
+  const minBaseInteractive = isLowEnd ? currentConfig.minInteractiveIterationsLowEnd : currentConfig.minInteractiveIterations;
+  const zoomMultiplierInteractive = isLowEnd ? 1.0 : 2.0;
+  const safeMinInteractive = Math.max(minBaseInteractive, minBaseInteractive + Math.min(24, zoomFactor * zoomMultiplierInteractive));
+
+  const minBaseSettled = isLowEnd ? currentConfig.minSettledIterationsLowEnd : currentConfig.minSettledIterations;
+  const zoomMultiplierSettled = isLowEnd ? 1.5 : 3.0;
+  const safeMinSettled = Math.max(minBaseSettled, minBaseSettled + Math.min(24, zoomFactor * zoomMultiplierSettled));
+
+  // Apply user quality offset and clamp to safe minimums
+  const finalInteractiveIterations = Math.max(safeMinInteractive, adaptiveIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep));
+  const finalSettledIterations = Math.max(safeMinSettled, adaptiveSettledIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep));
 
   return (
     <div 
@@ -768,8 +789,8 @@ export default function App() {
         parameters={parameters}
         isInteracting={isInteracting}
         interactionType={interactionType}
-        adaptiveIterations={adaptiveIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep)}
-        adaptiveSettledIterations={adaptiveSettledIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep)}
+        adaptiveIterations={finalInteractiveIterations}
+        adaptiveSettledIterations={finalSettledIterations}
         onFrameTime={handleFrameTime}
         settleTime={settleTime}
         isVisible={isVisible}
@@ -910,19 +931,19 @@ export default function App() {
                     <span className="text-[9px] font-mono uppercase text-cyan-500/60">
                       {fractalType === 0 ? 'Power' : (fractalType === 1 || fractalType === 3 || fractalType === 4) ? 'Scale' : 'Param 1'}
                     </span>
-                    <span className="text-[10px] font-mono text-cyan-400">{parameters.p1.toFixed(2)}</span>
+                    <span className="text-[10px] font-mono text-cyan-400">{parameters.param1.toFixed(2)}</span>
                   </div>
                   <input 
                     type="range" 
                     min={fractalType === 0 ? "2" : "1"} 
                     max={fractalType === 0 ? "20" : (fractalType === 1 ? "12" : "5")} 
                     step="0.01"
-                    value={parameters.p1}
-                    onMouseDown={() => { setIsDragging(true); setDraggingParam('p1'); }}
+                    value={parameters.param1}
+                    onMouseDown={() => { setIsDragging(true); setDraggingParam('param1'); }}
                     onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
-                    onTouchStart={() => { setIsDragging(true); setDraggingParam('p1'); }}
+                    onTouchStart={() => { setIsDragging(true); setDraggingParam('param1'); }}
                     onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
-                    onChange={(e) => updateCurrentView({ parameters: { p1: parseFloat(e.target.value) } })}
+                    onChange={(e) => updateCurrentView({ parameters: { param1: parseFloat(e.target.value) } })}
                     className="w-full h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
                   />
                 </div>
@@ -931,45 +952,45 @@ export default function App() {
               {/* Dynamic Parameter 2 & 3 (Julia C or Mandelbox Radius) */}
               {(fractalType === 2 || fractalType === 4) && (
                 <>
-                  <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'p2' ? 'opacity-20' : 'opacity-100'}`}>
+                  <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'param2' ? 'opacity-20' : 'opacity-100'}`}>
                     <div className="flex justify-between items-center">
                       <span className="text-[9px] font-mono uppercase text-cyan-500/60">
                         {fractalType === 2 ? 'C Real' : 'Min Radius'}
                       </span>
-                      <span className="text-[10px] font-mono text-cyan-400">{parameters.p2.toFixed(3)}</span>
+                      <span className="text-[10px] font-mono text-cyan-400">{parameters.param2.toFixed(3)}</span>
                     </div>
                     <input 
                       type="range" 
                       min={fractalType === 2 ? "-2" : "0.01"} 
                       max={fractalType === 2 ? "2" : "2"} 
                       step="0.001"
-                      value={parameters.p2}
-                      onMouseDown={() => { setIsDragging(true); setDraggingParam('p2'); }}
+                      value={parameters.param2}
+                      onMouseDown={() => { setIsDragging(true); setDraggingParam('param2'); }}
                       onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
-                      onTouchStart={() => { setIsDragging(true); setDraggingParam('p2'); }}
+                      onTouchStart={() => { setIsDragging(true); setDraggingParam('param2'); }}
                       onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
-                      onChange={(e) => updateCurrentView({ parameters: { p2: parseFloat(e.target.value) } })}
+                      onChange={(e) => updateCurrentView({ parameters: { param2: parseFloat(e.target.value) } })}
                       className="w-full h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
                     />
                   </div>
-                  <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'p3' ? 'opacity-20' : 'opacity-100'}`}>
+                  <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'param3' ? 'opacity-20' : 'opacity-100'}`}>
                     <div className="flex justify-between items-center">
                       <span className="text-[9px] font-mono uppercase text-cyan-500/60">
                         {fractalType === 2 ? 'C Imag' : 'Fixed Radius'}
                       </span>
-                      <span className="text-[10px] font-mono text-cyan-400">{parameters.p3.toFixed(3)}</span>
+                      <span className="text-[10px] font-mono text-cyan-400">{parameters.param3.toFixed(3)}</span>
                     </div>
                     <input 
                       type="range" 
                       min={fractalType === 2 ? "-2" : "0.1"} 
                       max={fractalType === 2 ? "2" : "3"} 
                       step="0.001"
-                      value={parameters.p3}
-                      onMouseDown={() => { setIsDragging(true); setDraggingParam('p3'); }}
+                      value={parameters.param3}
+                      onMouseDown={() => { setIsDragging(true); setDraggingParam('param3'); }}
                       onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
-                      onTouchStart={() => { setIsDragging(true); setDraggingParam('p3'); }}
+                      onTouchStart={() => { setIsDragging(true); setDraggingParam('param3'); }}
                       onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
-                      onChange={(e) => updateCurrentView({ parameters: { p3: parseFloat(e.target.value) } })}
+                      onChange={(e) => updateCurrentView({ parameters: { param3: parseFloat(e.target.value) } })}
                       className="w-full h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
                     />
                   </div>

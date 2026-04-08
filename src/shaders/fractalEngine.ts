@@ -7,36 +7,36 @@ import { wgslFn } from 'three/tsl';
  * 
  * Improved with descriptive variable names and comprehensive comments as requested.
  */
-export const fractalEngine = wgslFn(`
-  fn fractalRender(
+export const renderFractal = wgslFn(`
+  fn renderFractal(
     vUv: vec2<f32>,
-    uRes: vec2<f32>,
-    uType: i32,
-    uZoom: f32,
-    uOff: vec3<f32>,
-    uRot: mat3x3<f32>,
-    uInteracting: f32,
-    uInteractionType: i32,
-    uAdaptiveIterations: f32,        // Dynamically adjusted max iterations during interaction
-    uAdaptiveSettledIterations: f32, // Dynamically adjusted max iterations when settled
-    uSettleTime: f32,                // 0.0 to 1.0 transition from interactive to settled
-    uSlicerEnabled: f32,
-    uSlicerOffset: f32,
-    uSlicerAxis: i32,
-    uParams: vec4<f32>
+    uniformResolution: vec2<f32>,
+    uniformType: i32,
+    uniformZoom: f32,
+    uniformOffset: vec3<f32>,
+    uniformRotation: mat3x3<f32>,
+    uniformInteracting: f32,
+    uniformInteractionType: i32,
+    uniformAdaptiveIterations: f32,
+    uniformAdaptiveSettledIterations: f32,
+    uniformSettleTime: f32,
+    uniformSlicerEnabled: f32,
+    uniformSlicerOffset: f32,
+    uniformSlicerAxis: i32,
+    uniformParameters: vec4<f32>
   ) -> vec4<f32> {
     // Aspect ratio correction
-    var resolution = uRes;
+    var resolution = uniformResolution;
     if (resolution.y <= 0.0) { resolution.y = 1.0; }
     let uvCoords = (vUv - 0.5) * vec2<f32>(resolution.x / resolution.y, 1.0);
     
     // Level of Detail calculation
-    let zoomLOD = log2(max(1.0, uZoom));
+    let zoomLOD = log2(max(1.0, uniformZoom));
     let lodFactor = clamp(zoomLOD / 10.0, 0.0, 1.0);
     
     // Ray setup
-    let rayOrigin = uRot * vec3<f32>(0.0, 0.0, -5.0) + uOff;
-    let rayDirection = uRot * normalize(vec3<f32>(uvCoords, 1.5));
+    let rayOrigin = uniformRotation * vec3<f32>(0.0, 0.0, -5.0) + uniformOffset;
+    let rayDirection = uniformRotation * normalize(vec3<f32>(uvCoords, 1.5));
     
     var totalDist = 0.1;
     var stepCount = 0;
@@ -45,7 +45,7 @@ export const fractalEngine = wgslFn(`
     // Dynamic raymarching steps
     // We scale the number of raymarching steps based on whether we are settled or interacting.
     // When settled, we also increase steps at higher zoom levels (lodFactor).
-    let maxSteps = i32(mix(64.0, mix(128.0, 768.0, lodFactor), uSettleTime));
+    let maxSteps = i32(mix(64.0, mix(128.0, 768.0, lodFactor), uniformSettleTime));
     
     // --- Raymarching Loop ---
     for (var i = 0; i < 768; i = i + 1) {
@@ -55,26 +55,26 @@ export const fractalEngine = wgslFn(`
       
       // Dynamic precision threshold
       // User requested more conservative threshold when settled to reduce graininess
-      let threshold = max(0.0000001, mix(0.0002, 0.000010, uSettleTime) * totalDist / uZoom);
+      let threshold = max(0.0000001, mix(0.0002, 0.000010, uniformSettleTime) * totalDist / uniformZoom);
       
       // Transform to global fractal space
-      let globalPoint = currentPoint / uZoom;
+      let globalPoint = (currentPoint - uniformOffset) / uniformZoom + uniformOffset;
       
       // Sample distance
       let data = getFractalData(
         globalPoint, 
-        uType, 
-        uParams, 
-        uSettleTime, 
+        uniformType, 
+        uniformParameters, 
+        uniformSettleTime, 
         zoomLOD, 
-        uSlicerEnabled, 
-        uSlicerOffset, 
-        uSlicerAxis,
-        uInteractionType,
-        uAdaptiveIterations,
-        uAdaptiveSettledIterations
+        uniformSlicerEnabled, 
+        uniformSlicerOffset, 
+        uniformSlicerAxis,
+        uniformInteractionType,
+        uniformAdaptiveIterations,
+        uniformAdaptiveSettledIterations
       );
-      let dist = data.x * uZoom;
+      let dist = data.x * uniformZoom;
       
       if (dist < threshold) {
         isHit = true;
@@ -85,7 +85,7 @@ export const fractalEngine = wgslFn(`
       stepCount = i;
       
       // Escape distance
-      if (totalDist > mix(10.0, 20.0, uSettleTime)) { break; }
+      if (totalDist > mix(10.0, 20.0, uniformSettleTime)) { break; }
     }
     
     // --- Shading ---
@@ -93,22 +93,22 @@ export const fractalEngine = wgslFn(`
       let hitPoint = rayOrigin + rayDirection * totalDist;
       
       // Dynamic precision threshold for normal calculation
-      let threshold = max(0.0000001, mix(0.0002, 0.000010, uSettleTime) * totalDist / uZoom);
+      let threshold = max(0.0000001, mix(0.0002, 0.000010, uniformSettleTime) * totalDist / uniformZoom);
       let epsilon = max(0.0000001, threshold * 0.5);
       
       // Normal calculation via finite difference
-      let pG = hitPoint / uZoom;
-      let hitData = getFractalData(pG, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations);
+      let pG = (hitPoint - uniformOffset) / uniformZoom + uniformOffset;
+      let hitData = getFractalData(pG, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations);
       let dC = hitData.x;
       
-      let pX = (hitPoint + vec3<f32>(epsilon, 0.0, 0.0)) / uZoom;
-      let dX = getFractalData(pX, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations).x;
+      let pX = (hitPoint + vec3<f32>(epsilon, 0.0, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
+      let dX = getFractalData(pX, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations).x;
       
-      let pY = (hitPoint + vec3<f32>(0.0, epsilon, 0.0)) / uZoom;
-      let dY = getFractalData(pY, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations).x;
+      let pY = (hitPoint + vec3<f32>(0.0, epsilon, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
+      let dY = getFractalData(pY, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations).x;
       
-      let pZ = (hitPoint + vec3<f32>(0.0, 0.0, epsilon)) / uZoom;
-      let dZ = getFractalData(pZ, uType, uParams, uSettleTime, zoomLOD, uSlicerEnabled, uSlicerOffset, uSlicerAxis, uInteractionType, uAdaptiveIterations, uAdaptiveSettledIterations).x;
+      let pZ = (hitPoint + vec3<f32>(0.0, 0.0, epsilon) - uniformOffset) / uniformZoom + uniformOffset;
+      let dZ = getFractalData(pZ, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations).x;
       
       let normal = normalize(vec3<f32>(dX, dY, dZ) - dC);
       
@@ -122,22 +122,22 @@ export const fractalEngine = wgslFn(`
       var baseColor = vec3<f32>(0.4, 0.6, 1.0); // Default Blue
       var accentColor = vec3<f32>(0.2, 0.4, 0.8);
       
-      if (uType == 0) { 
+      if (uniformType == 0) { 
         baseColor = vec3<f32>(1.0, 0.6, 0.3); // Gold/Orange
         accentColor = vec3<f32>(0.8, 0.2, 0.1);
-      } else if (uType == 1) { 
+      } else if (uniformType == 1) { 
         baseColor = vec3<f32>(0.7, 0.7, 0.7); // Silver
         accentColor = vec3<f32>(0.4, 0.5, 0.6);
-      } else if (uType == 2) { 
+      } else if (uniformType == 2) { 
         baseColor = vec3<f32>(0.6, 0.3, 0.9); // Purple
         accentColor = vec3<f32>(0.2, 0.1, 0.4);
-      } else if (uType == 3) { 
+      } else if (uniformType == 3) { 
         baseColor = vec3<f32>(1.0, 0.4, 0.4); // Red
         accentColor = vec3<f32>(0.6, 0.1, 0.1);
-      } else if (uType == 4) { 
+      } else if (uniformType == 4) { 
         baseColor = vec3<f32>(0.3, 0.8, 0.6); // Emerald
         accentColor = vec3<f32>(0.1, 0.3, 0.2);
-      } else if (uType == 5) { 
+      } else if (uniformType == 5) { 
         baseColor = vec3<f32>(0.9, 0.8, 0.4); // Sand
         accentColor = vec3<f32>(0.5, 0.3, 0.1);
       }
@@ -149,7 +149,7 @@ export const fractalEngine = wgslFn(`
       baseColor = mix(baseColor, accentColor, boostedFactor * 0.6);
       
       // Position-based color variation (very subtle)
-      let variation = fract(hitPoint / uZoom * 0.2 + 0.5);
+      let variation = fract(hitPoint / uniformZoom * 0.2 + 0.5);
       baseColor = mix(baseColor, variation, 0.08);
       
       let finalColor = (baseColor * diffuse + rim * 0.4) * ambientOcclusion;

@@ -27,12 +27,14 @@ export interface FractalConfig {
   minSettledIterations: number;
   minSettledIterationsLowEnd: number;
   maxSettledIterations: number;
+  panSensitivityMultiplier: number;
+  rotSensitivityMultiplier: number;
   parameters: {
-    qualityOffset: number; // User adjustment to adaptive iterations (-10 to +10)
-    qualityStep: number;   // How many iterations 1 unit of offset represents
-    p1: number; // Generic parameter 1 (e.g. Power, Scale)
-    p2: number; // Generic parameter 2 (e.g. Julia C real, MinRadius)
-    p3: number; // Generic parameter 3 (e.g. Julia C imag, FixedRadius)
+    qualityOffset: number;
+    qualityStep: number;
+    param1: number;
+    param2: number;
+    param3: number;
   };
   slicer: {
     enabled: boolean;
@@ -56,7 +58,9 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     minSettledIterations: 16,
     minSettledIterationsLowEnd: 8,
     maxSettledIterations: 128,
-    parameters: { qualityOffset: 0, qualityStep: 4, p1: 8.0, p2: 0, p3: 0 },
+    panSensitivityMultiplier: 1.0,
+    rotSensitivityMultiplier: 1.0,
+    parameters: { qualityOffset: 0, qualityStep: 4, param1: 8.0, param2: 0, param3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "1": { // Menger Sponge
@@ -69,7 +73,9 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     minSettledIterations: 8,
     minSettledIterationsLowEnd: 4,
     maxSettledIterations: 24,
-    parameters: { qualityOffset: 0, qualityStep: 1, p1: 5.0, p2: 0, p3: 0 },
+    panSensitivityMultiplier: 1.0,
+    rotSensitivityMultiplier: 1.0,
+    parameters: { qualityOffset: 0, qualityStep: 1, param1: 5.0, param2: 0, param3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "2": { // Julia Set
@@ -82,7 +88,9 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     minSettledIterations: 128,
     minSettledIterationsLowEnd: 64,
     maxSettledIterations: 512,
-    parameters: { qualityOffset: 0, qualityStep: 16, p1: 0, p2: -0.8, p3: 0.156 },
+    panSensitivityMultiplier: 2.08,
+    rotSensitivityMultiplier: 2.0,
+    parameters: { qualityOffset: 0, qualityStep: 16, param1: 0, param2: -0.8, param3: 0.156 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   },
   "3": { // Sierpinski Tetrahedron
@@ -95,7 +103,9 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     minSettledIterations: 40,
     minSettledIterationsLowEnd: 20,
     maxSettledIterations: 160,
-    parameters: { qualityOffset: 0, qualityStep: 8, p1: 2.0, p2: 0, p3: 0 },
+    panSensitivityMultiplier: 1.0,
+    rotSensitivityMultiplier: 1.0,
+    parameters: { qualityOffset: 0, qualityStep: 8, param1: 2.0, param2: 0, param3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "4": { // Mandelbox
@@ -108,7 +118,9 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     minSettledIterations: 24,
     minSettledIterationsLowEnd: 12,
     maxSettledIterations: 64,
-    parameters: { qualityOffset: 0, qualityStep: 4, p1: 2.0, p2: 0.135, p3: 1.0 },
+    panSensitivityMultiplier: 1.0,
+    rotSensitivityMultiplier: 1.0,
+    parameters: { qualityOffset: 0, qualityStep: 4, param1: 2.0, param2: 0.135, param3: 1.0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "5": { // Apollonian
@@ -121,7 +133,9 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     minSettledIterations: 10,
     minSettledIterationsLowEnd: 5,
     maxSettledIterations: 40,
-    parameters: { qualityOffset: 0, qualityStep: 2, p1: 1.0, p2: 0, p3: 0 },
+    panSensitivityMultiplier: 1.0,
+    rotSensitivityMultiplier: 1.0,
+    parameters: { qualityOffset: 0, qualityStep: 2, param1: 1.0, param2: 0, param3: 0 },
     slicer: { enabled: true, offset: 0, axis: 2 }
   }
 };
