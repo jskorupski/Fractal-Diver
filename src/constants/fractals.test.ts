@@ -17,17 +17,28 @@ describe('Fractal Constants', () => {
   it('should have valid initial parameters for each fractal', () => {
     Object.values(FRACTAL_CONFIGS).forEach(config => {
       expect(config.zoom).toBeGreaterThan(0);
-      expect(typeof config.parameters.qualityOffset).toBe('number');
-      expect(config.parameters.qualityStep).toBeGreaterThan(0);
+      expect(typeof config.parameters.param1).toBe('number');
+      expect(typeof config.parameters.param2).toBe('number');
+      expect(typeof config.parameters.param3).toBe('number');
       expect(Array.isArray(config.offset)).toBe(true);
       expect(config.offset.length).toBe(3);
       expect(config.rotation).toBeDefined();
       
       // Adaptive iteration bounds
       expect(config.minInteractiveIterations).toBeGreaterThan(0);
-      expect(config.maxInteractiveIterations).toBeGreaterThan(config.minInteractiveIterations);
+      expect(config.defaultInteractiveIterations).toBeGreaterThanOrEqual(config.minInteractiveIterations);
+      expect(config.maxInteractiveIterations).toBeGreaterThanOrEqual(config.defaultInteractiveIterations);
       expect(config.minSettledIterations).toBeGreaterThan(0);
-      expect(config.maxSettledIterations).toBeGreaterThan(config.minSettledIterations);
+      expect(config.defaultSettledIterations).toBeGreaterThanOrEqual(config.minSettledIterations);
+      expect(config.maxSettledIterations).toBeGreaterThanOrEqual(config.defaultSettledIterations);
+      
+      // Epsilon bounds
+      expect(config.minInteractiveEpsilon).toBeGreaterThan(0);
+      expect(config.defaultInteractiveEpsilon).toBeGreaterThanOrEqual(config.minInteractiveEpsilon);
+      expect(config.maxInteractiveEpsilon).toBeGreaterThanOrEqual(config.defaultInteractiveEpsilon);
+      expect(config.minSettledEpsilon).toBeGreaterThan(0);
+      expect(config.defaultSettledEpsilon).toBeGreaterThanOrEqual(config.minSettledEpsilon);
+      expect(config.maxSettledEpsilon).toBeGreaterThanOrEqual(config.defaultSettledEpsilon);
       
       // Slicer config
       expect(config.slicer).toBeDefined();

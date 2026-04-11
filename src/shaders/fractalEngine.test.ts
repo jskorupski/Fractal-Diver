@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { fractalEngine } from './fractalEngine';
+import { renderFractal } from './fractalEngine';
 
 describe('Fractal Engine Shader', () => {
   it('should be defined as a TSL function', () => {
-    expect(fractalEngine).toBeDefined();
-    expect(typeof fractalEngine).toBe('function');
+    expect(renderFractal).toBeDefined();
+    expect(typeof renderFractal).toBe('function');
   });
 });

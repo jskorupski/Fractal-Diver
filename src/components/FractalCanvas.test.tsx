@@ -58,12 +58,16 @@ describe('FractalCanvas Component', () => {
     zoom: 1,
     offset: new THREE.Vector3(0, 0, 0),
     rotation: new THREE.Quaternion(),
-    parameters: { qualityOffset: 0, p1: 0, p2: 0, p3: 0 },
+    parameters: { qualityOffset: 0, param1: 0, param2: 0, param3: 0 },
     isInteracting: false,
     interactionType: 0,
     adaptiveIterations: 10,
     adaptiveSettledIterations: 20,
-    settleTime: 0,
+    interactiveSteps: 128,
+    settledSteps: 768,
+    interactiveEpsilon: 0.0005,
+    settledEpsilon: 0.00001,
+    settleTimeRef: { current: 0 },
     isVisible: true,
     slicerEnabled: false,
     slicerOffset: 0,
@@ -148,9 +152,11 @@ describe('FractalCanvas Component', () => {
     // Simulate device loss
     await act(async () => {
       resolveDeviceLost!({ message: 'GPU crashed', reason: 'unknown' });
+      // Resolve microtasks
+      await Promise.resolve();
     });
 
-    expect(await screen.findByText(/WEBGPU DEVICE LOST/i)).toBeInTheDocument();
+    expect(screen.getByText(/WEBGPU DEVICE LOST/i)).toBeInTheDocument();
 
     // Fast-forward timers for retry
     await act(async () => {

@@ -6,9 +6,11 @@
 import { useState, useRef, TouchEvent as ReactTouchEvent, MouseEvent as ReactMouseEvent, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import FractalCanvas from './components/FractalCanvas';
+import DebugPanel from './components/DebugPanel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select';
 import { Button } from './components/ui/button';
 import { FRACTAL_NAMES, FRACTAL_CONFIGS } from './constants/fractals';
+import { usePerformanceAdaptation } from './hooks/usePerformanceAdaptation';
 
 import { Settings2, ChevronRight, ChevronDown } from 'lucide-react';
 
@@ -29,8 +31,6 @@ export default function App() {
     offset: THREE.Vector3;
     rotation: THREE.Quaternion;
     parameters: {
-      qualityOffset: number;
-      qualityStep: number;
       param1: number;
       param2: number;
       param3: number;
@@ -76,40 +76,48 @@ export default function App() {
   // Interaction and visibility states
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
   const [interactionType, setInteractionType] = useState<number>(0); // 0: none, 1: pan/rotate, 2: zoom
-  
-  // Adaptive iteration counts for interactive mode (targets 30fps)
-  const [adaptiveIterations, setAdaptiveIterations] = useState<Record<number, number>>(() => {
-    const initial: Record<number, number> = {};
-    Object.entries(FRACTAL_CONFIGS).forEach(([key, config]) => {
-      initial[parseInt(key)] = config.minInteractiveIterations;
-    });
-    return initial;
-  });
 
-  // Adaptive iteration counts for settled mode (targets 15fps)
-  const [adaptiveSettledIterations, setAdaptiveSettledIterations] = useState<Record<number, number>>(() => {
-    const initial: Record<number, number> = {};
-    Object.entries(FRACTAL_CONFIGS).forEach(([key, config]) => {
-      initial[parseInt(key)] = config.minSettledIterations;
-    });
-    return initial;
-  });
+  // Use the new performance adaptation hook
+  const {
+    interactiveEpsilon,
+    settledEpsilon,
+    interactiveIterations,
+    settledIterations,
+    onFrameTime,
+    overrideKnobs,
+    smoothedDelta
+  } = usePerformanceAdaptation(fractalType, isInteracting);
   
-  // Throttling refs for state updates
-  const lastAdaptiveUpdateRef = useRef<number>(0);
-  const lastSettledAdaptiveUpdateRef = useRef<number>(0);
-  const interactionStartTimeRef = useRef<number>(0);
-  const interactiveSmoothedDeltaRef = useRef<Record<number, number>>({});
-  const settledSmoothedDeltaRef = useRef<Record<number, number>>({});
   const lastActualMoveTimeRef = useRef<number>(0);
   const lastViewUpdateRef = useRef<number>(0);
-  const interactiveSampleCountRef = useRef<Record<number, number>>({});
-  const settledSampleCountRef = useRef<Record<number, number>>({});
-  const lastInteractionStateRef = useRef<boolean>(false);
-  const isLowEndRef = useRef<Record<number, boolean>>({});
-
-  const [settleTime, setSettleTime] = useState<number>(0);
+  
+  // Lock for settled quality to prevent continuous rendering
+  const settledQualityLockedRef = useRef<boolean>(false);
+  const lastSettledDirectionRef = useRef<number>(0);
+  
+  // FPS and Frame tracking
+  const renderCountRef = useRef<number>(0);
+  const fpsRef = useRef<number>(0);
+  const lastFpsTimeRef = useRef<number>(0);
+  const framesSinceLastFpsRef = useRef<number>(0);
+  
+  const settleTimeRef = useRef<number>(0);
   const [isVisible, setIsVisible] = useState<boolean>(true);
+  
+  // Performance Knobs (Dynamic Overrides)
+  const [interactiveSteps, setInteractiveSteps] = useState<number>(FRACTAL_CONFIGS["0"].interactiveSteps);
+  const [settledSteps, setSettledSteps] = useState<number>(FRACTAL_CONFIGS["0"].settledSteps);
+  
+    // Reset performance knobs and locks when fractal type changes
+  useEffect(() => {
+    const config = FRACTAL_CONFIGS[fractalType.toString()];
+    setInteractiveSteps(config.interactiveSteps);
+    setSettledSteps(config.settledSteps);
+    
+    // Reset settled quality lock
+    settledQualityLockedRef.current = false;
+    lastSettledDirectionRef.current = 0;
+  }, [fractalType]);
   
   const fractalViewsRef = useRef(fractalViews);
   useEffect(() => { fractalViewsRef.current = fractalViews; }, [fractalViews]);
@@ -130,9 +138,15 @@ export default function App() {
     zoom: number; 
     offset: THREE.Vector3; 
     rotation: THREE.Quaternion;
-    parameters: Partial<{ qualityOffset: number; qualityStep: number; param1: number; param2: number; param3: number }>;
+    parameters: Partial<{ param1: number; param2: number; param3: number }>;
     slicer: Partial<{ enabled: boolean; offset: number; axis: number }>;
   }>) => {
+    // Reset settled quality lock when parameters change
+    if (updates.parameters || updates.slicer) {
+      settledQualityLockedRef.current = false;
+      lastSettledDirectionRef.current = 0;
+    }
+
     setFractalViews(prev => {
       const current = prev[fractalType];
       return {
@@ -211,31 +225,6 @@ export default function App() {
   }, [resetView]);
 
   /**
-   * Effect: Handle settle timer.
-   * Increments when not interacting, used for progressive detail.
-   * Only runs when the app is visible to save battery.
-   */
-  useEffect(() => {
-    if (!isVisible) return;
-    
-    // Only run the timer if we are interacting or not yet settled
-    if (settleTime >= 1.0 && !isInteracting) return;
-
-    const interval = setInterval(() => {
-      if (isInteracting) {
-        setSettleTime(0);
-      } else {
-        setSettleTime((prev) => {
-          if (prev >= 1.0) return 1.0;
-          return Math.min(1.0, prev + 0.02);
-        });
-      }
-    }, 16); // ~60fps target
-
-    return () => clearInterval(interval);
-  }, [isInteracting, isVisible, settleTime >= 1.0]);
-
-  /**
    * Effect: Handle mouse wheel zoom events.
    * Uses a logarithmic scale for smoother zooming at different scales.
    */
@@ -298,16 +287,19 @@ export default function App() {
   const startInteraction = useCallback((type: number) => {
     setIsInteracting(true);
     setInteractionType(type);
-    setSettleTime(0);
-    interactionStartTimeRef.current = performance.now();
+    settleTimeRef.current = 0;
     
-    // Reset sample counts for the adaptive iteration logic
-    // This ensures we start fresh with each new interaction.
-    interactiveSampleCountRef.current[fractalType] = 0;
-    delete interactiveSmoothedDeltaRef.current[fractalType];
+    // Reset performance knobs to defaults on new interaction
+    const config = FRACTAL_CONFIGS[fractalType.toString()];
+    setInteractiveSteps(config.interactiveSteps);
+    setSettledSteps(config.settledSteps);
     
     // Reset multi-touch gesture tracking
     gestureModeRef.current = 0; // 0: none, 1: zoom, 2: pan
+    
+    // Reset settled quality lock
+    settledQualityLockedRef.current = false;
+    lastSettledDirectionRef.current = 0;
     
     // Reset view update throttle to allow immediate response for new interaction
     lastViewUpdateRef.current = 0;
@@ -320,11 +312,7 @@ export default function App() {
   const endInteraction = useCallback(() => {
     setIsInteracting(false);
     setInteractionType(0);
-    // Reset settled sample count to avoid adapting on the first few frames after interaction ends
-    // which might contain "leftover" work from the interactive state.
-    settledSampleCountRef.current[fractalType] = 0;
-    delete settledSmoothedDeltaRef.current[fractalType];
-  }, [fractalType]);
+  }, []);
 
   /**
    * Handles the start of a touch interaction.
@@ -361,6 +349,32 @@ export default function App() {
   };
 
   /**
+   * Helper to calculate a new rotation quaternion based on drag deltas.
+   * Inverts horizontal rotation if the camera is upside down.
+   */
+  const calculateRotation = (currentRotation: THREE.Quaternion, dx: number, dy: number, sensitivity: number) => {
+    const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(currentRotation);
+    const horizontalDirection = upVector.y < 0 ? -1 : 1;
+    
+    const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * sensitivity);
+    const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * sensitivity * horizontalDirection);
+    
+    return currentRotation.clone().multiply(deltaRotX).premultiply(deltaRotY);
+  };
+
+  /**
+   * Helper to calculate a new offset vector based on drag deltas.
+   * Moves the camera relative to its current orientation.
+   */
+  const calculatePanning = (currentRotation: THREE.Quaternion, currentOffset: THREE.Vector3, dx: number, dy: number, sensitivity: number) => {
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(currentRotation);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(currentRotation);
+    
+    const deltaPan = right.multiplyScalar(-dx * sensitivity).add(up.multiplyScalar(dy * sensitivity));
+    return currentOffset.clone().add(deltaPan);
+  };
+
+  /**
    * Handles mouse move events for rotation or panning.
    * Implements zoom-aware sensitivity scaling to ensure consistent movement
    * regardless of magnification level.
@@ -382,48 +396,28 @@ export default function App() {
         
         if (e.shiftKey) {
           // Shift + Drag: Panning
-          // Panning sensitivity scales inversely with zoom relative to the fractal's default scale.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
           const baseSensitivity = 0.0012 * defaultConfig.panSensitivityMultiplier;
           const panSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
           
-          // Calculate camera-relative right and up vectors
-          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
-          const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
-          
-          const deltaPan = right.multiplyScalar(-dx * panSensitivity).add(up.multiplyScalar(dy * panSensitivity));
-          
           return {
             ...prev,
             [fractalType]: {
               ...current,
-              offset: current.offset.clone().add(deltaPan)
+              offset: calculatePanning(current.rotation, current.offset, dx, dy, panSensitivity)
             }
           };
         } else {
           // Normal Drag: Rotation
-          // Rotation sensitivity also scales with zoom to allow for finer control at high zoom levels.
           const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
           const baseSensitivity = 0.003 * defaultConfig.rotSensitivityMultiplier;
           const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
-          
-          // To prevent "reversed" rotation when the camera is upside down, we check the current up vector.
-          // If the camera is upside down (looking from the bottom), horizontal drag should be inverted.
-          const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
-          const horizontalDirection = upVector.y < 0 ? -1 : 1;
-          
-          // Calculate camera-relative rotation
-          const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
-          const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity * horizontalDirection);
-          
-          // Apply rotations: Y is applied globally (turntable), X is applied locally
-          const nextRotation = current.rotation.clone().multiply(deltaRotX).premultiply(deltaRotY);
           
           return {
             ...prev,
             [fractalType]: {
               ...current,
-              rotation: nextRotation
+              rotation: calculateRotation(current.rotation, dx, dy, rotSensitivity)
             }
           };
         }
@@ -462,24 +456,16 @@ export default function App() {
       setFractalViews(prev => {
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
+        
         // Boost sensitivity for Julia set (type 2) as it feels too slow when zoomed in
         const baseSensitivity = 0.012 * defaultConfig.rotSensitivityMultiplier;
         const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
-        
-        // To prevent "reversed" rotation when the camera is upside down, we check the current up vector.
-        // If the camera is upside down (looking from the bottom), horizontal drag should be inverted.
-        const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
-        const horizontalDirection = upVector.y < 0 ? -1 : 1;
-        
-        const deltaRotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * rotSensitivity);
-        const deltaRotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * rotSensitivity * horizontalDirection);
-        const nextRotation = current.rotation.clone().multiply(deltaRotX).premultiply(deltaRotY);
         
         return {
           ...prev,
           [fractalType]: {
             ...current,
-            rotation: nextRotation
+            rotation: calculateRotation(current.rotation, dx, dy, rotSensitivity)
           }
         };
       });
@@ -532,13 +518,7 @@ export default function App() {
           // Locked to Pan
           const basePanSensitivity = 0.0012 * defaultConfig.panSensitivityMultiplier;
           const panSensitivity = basePanSensitivity * (defaultConfig.zoom / current.zoom);
-          
-          // Calculate camera-relative right and up vectors
-          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(current.rotation);
-          const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current.rotation);
-          
-          const deltaPan = right.multiplyScalar(-deltaX * panSensitivity).add(up.multiplyScalar(deltaY * panSensitivity));
-          nextOffset.add(deltaPan);
+          nextOffset = calculatePanning(current.rotation, current.offset, deltaX, deltaY, panSensitivity);
         }
         
         return {
@@ -576,183 +556,53 @@ export default function App() {
    * Used to adaptively adjust iteration counts to target 30fps (interactive) or 15fps (settled).
    * This ensures that the app remains performant on a wide range of devices.
    */
-  const handleFrameTime = useCallback((delta: number) => {
+  const handleFrameTime = useCallback((delta: number, isMoving: boolean) => {
     const now = performance.now();
-    const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
-    const userOffset = parameters.qualityOffset * parameters.qualityStep;
-
-    // Detect state transition to prevent "polluted" deltas from the previous state
-    // (e.g. a slow settled frame being counted as a slow interactive frame)
-    if (isInteracting !== lastInteractionStateRef.current) {
-      lastInteractionStateRef.current = isInteracting;
-      if (isInteracting) {
-        interactiveSampleCountRef.current[fractalType] = 0;
-        delete interactiveSmoothedDeltaRef.current[fractalType];
-      } else {
-        settledSampleCountRef.current[fractalType] = 0;
-        delete settledSmoothedDeltaRef.current[fractalType];
-      }
-    }
-
-    // Exponential smoothing for frame delta to prevent "popping"
-    // We use separate trackers for interactive and settled modes.
-    const interactionDuration = now - interactionStartTimeRef.current;
-    const baseSmoothing = isInteracting ? 0.15 : 0.08;
-    const smoothingFactor = isInteracting 
-      ? Math.max(0.05, baseSmoothing * Math.exp(-interactionDuration / 2000)) 
-      : baseSmoothing;
     
-    if (isInteracting) {
-      const prevSmoothed = interactiveSmoothedDeltaRef.current[fractalType] ?? delta;
-      const smoothedDelta = prevSmoothed * (1 - smoothingFactor) + delta * smoothingFactor;
-      interactiveSmoothedDeltaRef.current[fractalType] = smoothedDelta;
-
-      // Track sample count
-      interactiveSampleCountRef.current[fractalType] = (interactiveSampleCountRef.current[fractalType] ?? 0) + 1;
-      const minSamples = 3;
-
-      // Interactive mode: target 30fps for smooth navigation
-      // If struggling, target 15fps
-      const isLowEnd = isLowEndRef.current[fractalType] ?? false;
-      const targetFrameTime = isLowEnd ? 1 / 15 : 1 / 30; // 66.6ms or 33.3ms
-      
-      // Calculate dynamic minimum iterations based on zoom level.
-      // As we zoom in, we need more iterations to prevent "blobby" details.
-      // We scale this more conservatively on low-end devices to maintain performance.
-      const minBase = isLowEnd ? currentConfig.minInteractiveIterationsLowEnd : currentConfig.minInteractiveIterations;
-      const currentZoom = fractalViewsRef.current[fractalType].zoom;
-      const zoomFactor = Math.log2(Math.max(1, currentZoom));
-      const zoomMultiplier = isLowEnd ? 1.0 : 3.0;
-      const dynamicMinIterations = Math.max(
-        minBase,
-        minBase + Math.min(24, zoomFactor * zoomMultiplier)
-      );
-      
-      // Aggressiveness starts high (4.0) and decays exponentially to 1.0 over ~500ms.
-      const aggressiveness = Math.max(1.0, 4.0 * Math.exp(-interactionDuration / 500));
-      
-      // Normalize delta to ignore the user's quality offset impact.
-      const currentBase = adaptiveIterations[fractalType];
-      const totalIter = Math.max(1, currentBase + userOffset);
-      const normalizedDelta = smoothedDelta * (currentBase / totalIter);
-      
-      // Detect struggling: if normalizedDelta is consistently high, set isLowEnd
-      if (normalizedDelta > targetFrameTime * 2.0) {
-        if (interactiveSampleCountRef.current[fractalType]! > 60) {
-          if (!(isLowEndRef.current[fractalType] ?? false)) {
-            isLowEndRef.current[fractalType] = true;
-          }
-        }
-      } else if (normalizedDelta < targetFrameTime * 0.5) {
-        if (isLowEndRef.current[fractalType] ?? false) {
-          isLowEndRef.current[fractalType] = false;
-        }
-      }
-
-      setAdaptiveIterations(prev => {
-        const current = prev[fractalType];
-        let nextIter = current;
-        
-        // Hysteresis / Deadband logic:
-        // Decrease if > 1.2x target, Increase if < 0.75x target.
-        if (normalizedDelta > targetFrameTime * 1.5) {
-          // Critical lag: drop iterations
-          nextIter = Math.max(dynamicMinIterations, nextIter - 2.0 * aggressiveness);
-        } else if (normalizedDelta > targetFrameTime * 1.2) {
-          // Too slow: decrease iterations
-          nextIter = Math.max(dynamicMinIterations, nextIter - 0.5 * aggressiveness);
-        } else if (normalizedDelta < targetFrameTime * 0.75) {
-          // Fast enough: increase iterations to improve quality.
-          nextIter = Math.min(currentConfig.maxInteractiveIterations, nextIter + 0.2 * aggressiveness);
-        }
-        
-        if (nextIter === current || interactiveSampleCountRef.current[fractalType] < minSamples) return prev;
-        
-        // Throttle state updates
-        const isActuallyMoving = now - lastActualMoveTimeRef.current < 100;
-        const throttleTime = isActuallyMoving ? 16 : Math.max(16, Math.min(100, interactionDuration / 10));
-        
-        if (now - lastAdaptiveUpdateRef.current < throttleTime) return prev;
-        lastAdaptiveUpdateRef.current = now;
-        
-        return { ...prev, [fractalType]: nextIter };
-      });
-    } else {
-      const prevSmoothed = settledSmoothedDeltaRef.current[fractalType] ?? delta;
-      const smoothedDelta = prevSmoothed * (1 - smoothingFactor) + delta * smoothingFactor;
-      settledSmoothedDeltaRef.current[fractalType] = smoothedDelta;
-
-      // Track sample count
-      settledSampleCountRef.current[fractalType] = (settledSampleCountRef.current[fractalType] ?? 0) + 1;
-      const minSamples = 15;
-
-      // Settled mode: target 15fps for higher detail when static
-      // If struggling, target 8fps
-      const isLowEnd = isLowEndRef.current[fractalType] ?? false;
-      const targetFrameTime = isLowEnd ? 1 / 8 : 1 / 15; // 125ms or 66.6ms
-      
-      // Normalize delta to ignore the user's quality offset impact
-      const currentBase = adaptiveSettledIterations[fractalType];
-      const totalIter = Math.max(1, currentBase + userOffset);
-      const normalizedDelta = smoothedDelta * (currentBase / totalIter);
-      
-      // Calculate dynamic minimum iterations based on zoom level.
-      const minBase = isLowEnd ? currentConfig.minSettledIterationsLowEnd : currentConfig.minSettledIterations;
-      const currentZoom = fractalViewsRef.current[fractalType].zoom;
-      const zoomFactor = Math.log2(Math.max(1, currentZoom));
-      const zoomMultiplier = isLowEnd ? 1.5 : 3.0;
-      const dynamicMinIterations = Math.max(
-        minBase,
-        minBase + Math.min(24, zoomFactor * zoomMultiplier)
-      );
-
-      // Only adapt settled iterations when we are actually settled (settleTime is high)
-      // or if we are clearly over-budget.
-      if (settleTime < 0.5 && normalizedDelta < targetFrameTime) return;
-
-      setAdaptiveSettledIterations(prev => {
-        const current = prev[fractalType];
-        let nextIter = current;
-        
-        // Wider deadband for settled mode to keep the image stable
-        if (normalizedDelta > targetFrameTime * 1.25) {
-          // Too slow, decrease settled iterations
-          nextIter = Math.max(dynamicMinIterations, nextIter - 1.5);
-        } else if (normalizedDelta < targetFrameTime * 0.7) {
-          // Fast enough, increase settled iterations
-          nextIter = Math.min(currentConfig.maxSettledIterations, nextIter + 0.4);
-        }
-        
-        if (nextIter === current || settledSampleCountRef.current[fractalType] < minSamples) return prev;
-        
-        // Throttle state updates to ~5fps for settled mode
-        if (now - lastSettledAdaptiveUpdateRef.current < 200) return prev;
-        lastSettledAdaptiveUpdateRef.current = now;
-        
-        return { ...prev, [fractalType]: nextIter };
-      });
+    // --- FPS and Render Count Tracking ---
+    renderCountRef.current = (renderCountRef.current + 1) % 100;
+    framesSinceLastFpsRef.current++;
+    if (now - lastFpsTimeRef.current >= 1000) {
+      fpsRef.current = Math.round((framesSinceLastFpsRef.current * 1000) / (now - lastFpsTimeRef.current));
+      framesSinceLastFpsRef.current = 0;
+      lastFpsTimeRef.current = now;
     }
-  }, [isInteracting, fractalType, parameters.qualityOffset, parameters.qualityStep, adaptiveIterations, adaptiveSettledIterations, settleTime, startInteraction, endInteraction]);
+    // -------------------------------------
+
+    const isActuallyMoving = (now - lastActualMoveTimeRef.current < 100) || isMoving;
+    
+    // Smoothly transition settleTime from 0.0 to 1.0 over ~400ms when not interacting
+    if (isInteracting) {
+      settleTimeRef.current = 0;
+    } else {
+      settleTimeRef.current = Math.min(1.0, settleTimeRef.current + delta * 2.5);
+    }
+
+    // Delegate to the new performance adaptation hook
+    onFrameTime(delta, now);
+
+  }, [isInteracting, onFrameTime]);
 
   // --- Render Calculations ---
 
   // Calculate safe minimum iterations for the current view to prevent blocky rendering
   const currentZoom = fractalViews[fractalType].zoom;
   const zoomFactor = Math.log2(Math.max(1, currentZoom));
-  const isLowEnd = isLowEndRef.current[fractalType] ?? false;
   const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
   
-  const minBaseInteractive = isLowEnd ? currentConfig.minInteractiveIterationsLowEnd : currentConfig.minInteractiveIterations;
-  const zoomMultiplierInteractive = isLowEnd ? 1.0 : 2.0;
-  const safeMinInteractive = Math.max(minBaseInteractive, minBaseInteractive + Math.min(24, zoomFactor * zoomMultiplierInteractive));
+  // Continuous Iteration Levels
+  const baseInteractiveIter = interactiveIterations;
+  const baseSettledIter = settledIterations;
 
-  const minBaseSettled = isLowEnd ? currentConfig.minSettledIterationsLowEnd : currentConfig.minSettledIterations;
-  const zoomMultiplierSettled = isLowEnd ? 1.5 : 3.0;
-  const safeMinSettled = Math.max(minBaseSettled, minBaseSettled + Math.min(24, zoomFactor * zoomMultiplierSettled));
+  const zoomMultiplierInteractive = 2.0;
+  const finalInteractiveIterations = Math.max(baseInteractiveIter, baseInteractiveIter + Math.min(24, zoomFactor * zoomMultiplierInteractive));
 
-  // Apply user quality offset and clamp to safe minimums
-  const finalInteractiveIterations = Math.max(safeMinInteractive, adaptiveIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep));
-  const finalSettledIterations = Math.max(safeMinSettled, adaptiveSettledIterations[fractalType] + (parameters.qualityOffset * parameters.qualityStep));
+  const zoomMultiplierSettled = 3.0;
+  const finalSettledIterations = Math.max(baseSettledIter, baseSettledIter + Math.min(24, zoomFactor * zoomMultiplierSettled));
+
+  // Use adaptive epsilon directly
+  const finalInteractiveEpsilon = interactiveEpsilon;
+  const finalSettledEpsilon = settledEpsilon;
 
   return (
     <div 
@@ -790,8 +640,12 @@ export default function App() {
         interactionType={interactionType}
         adaptiveIterations={finalInteractiveIterations}
         adaptiveSettledIterations={finalSettledIterations}
+        interactiveSteps={interactiveSteps}
+        settledSteps={settledSteps}
+        interactiveEpsilon={finalInteractiveEpsilon}
+        settledEpsilon={finalSettledEpsilon}
         onFrameTime={handleFrameTime}
-        settleTime={settleTime}
+        settleTimeRef={settleTimeRef}
         isVisible={isVisible}
         slicerEnabled={slicer.enabled}
         slicerOffset={slicer.offset}
@@ -895,34 +749,6 @@ export default function App() {
                 <span className="text-[10px] font-mono uppercase text-cyan-400 tracking-[0.2em]">Fractal Parameters</span>
               </div>
 
-              {/* Quality Offset Slider */}
-              <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'quality' ? 'opacity-20' : 'opacity-100'}`}>
-                <div className="flex justify-between items-center">
-                  <span className="text-[9px] font-mono uppercase text-cyan-500/60">Render Quality</span>
-                  <span className="text-[10px] font-mono text-cyan-400">
-                    {parameters.qualityOffset > 0 ? `+${parameters.qualityOffset}` : parameters.qualityOffset}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-[8px] font-mono text-cyan-500/40 uppercase">Low</span>
-                  <input 
-                    type="range" 
-                    aria-label="Quality"
-                    min="-2" 
-                    max="2" 
-                    step="1"
-                    value={parameters.qualityOffset}
-                    onMouseDown={() => { setIsDragging(true); setDraggingParam('quality'); }}
-                    onMouseUp={() => { setIsDragging(false); setDraggingParam(null); }}
-                    onTouchStart={() => { setIsDragging(true); setDraggingParam('quality'); }}
-                    onTouchEnd={() => { setIsDragging(false); setDraggingParam(null); }}
-                    onChange={(e) => updateCurrentView({ parameters: { qualityOffset: parseInt(e.target.value) } })}
-                    className="flex-1 h-1.5 bg-cyan-500/10 appearance-none cursor-pointer accent-cyan-400 rounded-full"
-                  />
-                  <span className="text-[8px] font-mono text-cyan-500/40 uppercase">High</span>
-                </div>
-              </div>
-
               {/* Dynamic Parameter 1 */}
               {fractalType !== 2 && ( // Julia uses p2, p3
                 <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'p1' ? 'opacity-20' : 'opacity-100'}`}>
@@ -934,6 +760,7 @@ export default function App() {
                   </div>
                   <input 
                     type="range" 
+                    aria-label={fractalType === 0 ? 'Power' : (fractalType === 1 || fractalType === 3 || fractalType === 4) ? 'Scale' : 'Param 1'}
                     min={fractalType === 0 ? "2" : "1"} 
                     max={fractalType === 0 ? "20" : (fractalType === 1 ? "12" : "5")} 
                     step="0.01"
@@ -960,6 +787,7 @@ export default function App() {
                     </div>
                     <input 
                       type="range" 
+                      aria-label={fractalType === 2 ? 'C Real' : 'Min Radius'}
                       min={fractalType === 2 ? "-2" : "0.01"} 
                       max={fractalType === 2 ? "2" : "2"} 
                       step="0.001"
@@ -981,6 +809,7 @@ export default function App() {
                     </div>
                     <input 
                       type="range" 
+                      aria-label={fractalType === 2 ? 'C Imag' : 'Fixed Radius'}
                       min={fractalType === 2 ? "-2" : "0.1"} 
                       max={fractalType === 2 ? "2" : "3"} 
                       step="0.001"
@@ -1066,6 +895,31 @@ export default function App() {
               </div>
             )}
           </div>
+        )}
+        {((import.meta as any).env?.MODE !== 'test') && (
+          <DebugPanel 
+            currentInteractiveIterations={finalInteractiveIterations}
+            currentSettledIterations={finalSettledIterations}
+            settleTimeRef={settleTimeRef}
+            fractalType={fractalType}
+            renderCountRef={renderCountRef}
+            fpsRef={fpsRef}
+            performanceKnobs={{
+              interactiveSteps,
+              settledSteps,
+              interactiveEpsilon: finalInteractiveEpsilon,
+              settledEpsilon: finalSettledEpsilon
+            }}
+            onUpdateKnobs={(knobs) => {
+              overrideKnobs(knobs);
+              if (knobs.settledIterations !== undefined || knobs.settledEpsilon !== undefined) {
+                settledQualityLockedRef.current = false;
+                lastSettledDirectionRef.current = 0;
+              }
+              if (knobs.interactiveSteps !== undefined) setInteractiveSteps(knobs.interactiveSteps);
+              if (knobs.settledSteps !== undefined) setSettledSteps(knobs.settledSteps);
+            }}
+          />
         )}
       </div>
     </div>

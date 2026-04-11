@@ -42,7 +42,7 @@ describe('App Component', () => {
     const toggleButton = screen.getByRole('button', { name: /settings/i });
     
     fireEvent.click(toggleButton);
-    expect(screen.getByText(/Render Quality/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fractal Parameters/i)).toBeInTheDocument();
   });
 
   it('resets the view when the reset button is clicked', () => {
@@ -87,14 +87,14 @@ describe('App Component', () => {
     // Open settings panel
     fireEvent.click(screen.getByRole('button', { name: /settings/i }));
     
-    // Find the quality slider
-    const qualitySlider = screen.getByLabelText(/Quality/i);
+    // Find the param1 slider (Power for Mandelbulb)
+    const paramSlider = screen.getByLabelText(/Power/i);
     
     // Change the slider value
-    fireEvent.change(qualitySlider, { target: { value: '1' } });
+    fireEvent.change(paramSlider, { target: { value: '10' } });
     
     // Check if the value is updated in the UI
-    expect(screen.getByText('+1')).toBeInTheDocument();
+    expect(paramSlider).toHaveValue('10');
   });
 
   it('updates opacity when a parameter is being dragged', () => {
@@ -102,10 +102,10 @@ describe('App Component', () => {
     // Open settings panel
     fireEvent.click(screen.getByRole('button', { name: /settings/i }));
     
-    const qualitySlider = screen.getByLabelText(/Quality/i);
+    const paramSlider = screen.getByLabelText(/Power/i);
     
     // Start dragging
-    fireEvent.mouseDown(qualitySlider);
+    fireEvent.mouseDown(paramSlider);
     
     // The settings panel should have full opacity because it's the active param
     const settingsPanel = screen.getByTestId('parameters-panel');
@@ -116,7 +116,7 @@ describe('App Component', () => {
     expect(mainControls).toHaveClass('opacity-20');
     
     // Stop dragging
-    fireEvent.mouseUp(qualitySlider);
+    fireEvent.mouseUp(paramSlider);
     expect(mainControls).toHaveClass('opacity-100');
   });
 
@@ -285,45 +285,64 @@ describe('App Component', () => {
     expect(visibleCallProps.isVisible).toBe(true);
   });
 
-  it('adapts iterations based on frame time', async () => {
+  it('adapts epsilon based on frame time', async () => {
     render(<App />);
     // Get the most recent call to FractalCanvas
     const lastCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
     const handleFrameTime = lastCall.onFrameTime;
     
-    // Simulate slow frames (e.g. 100ms) while not interacting
-    // We need enough samples (min 15 for settled)
+    // Mock performance.now to advance time
+    let mockTime = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => mockTime);
+
+    // Simulate slow frames (e.g. 200ms) while not interacting
+    // Target is 15fps (66ms), so 200ms is very slow.
     await act(async () => {
       for (let i = 0; i < 20; i++) {
-        handleFrameTime(0.1);
+        mockTime += 100;
+        handleFrameTime(0.2);
       }
     });
     
-    // Check if adaptiveSettledIterations decreased (default is 100 for Mandelbulb)
+    // Check if settledEpsilon increased (lower precision)
     const updatedCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
-    expect(updatedCall.adaptiveSettledIterations).toBeLessThan(100);
+    expect(updatedCall.settledEpsilon).toBeGreaterThan(0.00001);
+
+    vi.restoreAllMocks();
   });
 
-  it('adapts iterations during interaction', async () => {
+  it('adapts epsilon during interaction', async () => {
     render(<App />);
-    const container = screen.getByTestId('app-container');
+    const canvas = screen.getByTestId('fractal-canvas');
     
+    // Mock performance.now to advance time
+    let mockTime = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => mockTime);
+
     // Start interaction
-    fireEvent.mouseDown(container, { clientX: 100, clientY: 100 });
-    
-    const lastCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
-    const handleFrameTime = lastCall.onFrameTime;
-    
-    // Simulate slow frames (e.g. 100ms) while interacting
-    // Target is 30fps (33ms), so 100ms is very slow.
     await act(async () => {
-      for (let i = 0; i < 10; i++) {
-        handleFrameTime(0.1);
-      }
+      fireEvent.mouseDown(canvas, { clientX: 100, clientY: 100, button: 0 });
     });
     
-    const updatedCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
-    // Interactive iterations should decrease (default is 32 for Mandelbulb)
-    expect(updatedCall.adaptiveIterations).toBeLessThan(32);
+    // Verify isInteracting is true in the latest call
+    let lastCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(lastCall.isInteracting).toBe(true);
+    
+    const handleFrameTime = lastCall.onFrameTime;
+    
+    // Simulate slow frames (e.g. 500ms) while interacting
+    for (let i = 0; i < 20; i++) {
+      await act(async () => {
+        mockTime += 100;
+        handleFrameTime(0.5);
+      });
+    }
+    
+    // Get the absolute latest call
+    const finalCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    // Interactive epsilon should increase (lower precision)
+    expect(finalCall.interactiveEpsilon).toBeGreaterThan(0.00001);
+    
+    vi.restoreAllMocks();
   });
 });

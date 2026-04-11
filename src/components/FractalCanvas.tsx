@@ -35,9 +35,13 @@ interface FractalMeshProps {
   interactionType: number;
   adaptiveIterations: number;        // Max iterations during interaction (targets 30fps)
   adaptiveSettledIterations: number; // Max iterations when settled (targets 15fps)
-  onFrameTime?: (delta: number) => void;
-  settleTime: number;
+  onFrameTime?: (delta: number, isMoving: boolean) => void;
+  settleTimeRef: React.MutableRefObject<number>;
   isVisible: boolean;
+  interactiveSteps: number;
+  settledSteps: number;
+  interactiveEpsilon: number;
+  settledEpsilon: number;
   slicerEnabled: boolean;
   slicerOffset: number;
   slicerAxis: number;
@@ -65,8 +69,12 @@ function FractalMesh({
   adaptiveIterations,
   adaptiveSettledIterations,
   onFrameTime,
-  settleTime,
+  settleTimeRef,
   isVisible,
+  interactiveSteps,
+  settledSteps,
+  interactiveEpsilon,
+  settledEpsilon,
   slicerEnabled,
   slicerOffset,
   slicerAxis,
@@ -93,7 +101,11 @@ function FractalMesh({
     uniformInteractionType: uniform(Math.floor(interactionType)),
     uniformAdaptiveIterations: uniform(adaptiveIterations),
     uniformAdaptiveSettledIterations: uniform(adaptiveSettledIterations),
-    uniformSettleTime: uniform(settleTime),
+    uniformSettleTime: uniform(settleTimeRef.current),
+    uniformInteractiveSteps: uniform(interactiveSteps),
+    uniformSettledSteps: uniform(settledSteps),
+    uniformInteractiveEpsilon: uniform(interactiveEpsilon),
+    uniformSettledEpsilon: uniform(settledEpsilon),
     uniformSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
     uniformSlicerOffset: uniform(slicerOffset),
     uniformSlicerAxis: uniform(Math.floor(slicerAxis)),
@@ -105,7 +117,7 @@ function FractalMesh({
     if (isVisible) {
       invalidate();
     }
-  }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, adaptiveIterations, adaptiveSettledIterations, settleTime, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
+  }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, adaptiveIterations, adaptiveSettledIterations, interactiveSteps, settledSteps, interactiveEpsilon, settledEpsilon, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
 
   useEffect(() => {
     uniforms.uniformResolution.value.set(size.width, size.height);
@@ -113,9 +125,16 @@ function FractalMesh({
   }, [size, uniforms, invalidate]);
 
   useFrame((_state, delta) => {
+    // If we are still smoothing, keep invalidating
+    const isStillSmoothing = 
+      Math.abs(smoothedZoom.current - zoom) > 0.0001 ||
+      smoothedOffset.current.distanceTo(offset) > 0.0001 ||
+      smoothedRotation.current.angleTo(targetRotation) > 0.0001;
+
     // Report frame time for adaptive iterations
-    if (onFrameTime) {
-      onFrameTime(delta);
+    // Only report if delta is reasonable (e.g. < 0.5s) to avoid huge spikes from tab switching or idle
+    if (onFrameTime && delta < 0.5) {
+      onFrameTime(delta, isStillSmoothing);
     }
 
     // Smoothing factor (higher = faster response)
@@ -137,7 +156,11 @@ function FractalMesh({
     uniforms.uniformInteractionType.value = Math.floor(interactionType);
     uniforms.uniformAdaptiveIterations.value = adaptiveIterations;
     uniforms.uniformAdaptiveSettledIterations.value = adaptiveSettledIterations;
-    uniforms.uniformSettleTime.value = settleTime;
+    uniforms.uniformSettleTime.value = settleTimeRef.current;
+    uniforms.uniformInteractiveSteps.value = interactiveSteps;
+    uniforms.uniformSettledSteps.value = settledSteps;
+    uniforms.uniformInteractiveEpsilon.value = interactiveEpsilon;
+    uniforms.uniformSettledEpsilon.value = settledEpsilon;
     uniforms.uniformZoom.value = smoothedZoom.current;
     uniforms.uniformOffset.value.copy(smoothedOffset.current);
     uniforms.uniformRotation.value.setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(smoothedRotation.current));
@@ -147,13 +170,7 @@ function FractalMesh({
     uniforms.uniformSlicerAxis.value = Math.floor(slicerAxis);
     uniforms.uniformParameters.value.set(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3);
     
-    // If we are still smoothing, keep invalidating
-    const isStillSmoothing = 
-      Math.abs(smoothedZoom.current - zoom) > 0.0001 ||
-      smoothedOffset.current.distanceTo(offset) > 0.0001 ||
-      smoothedRotation.current.angleTo(targetRotation) > 0.0001;
-      
-    if (isStillSmoothing || isInteracting) {
+    if (isStillSmoothing || isInteracting || settleTimeRef.current < 1.0) {
       invalidate();
     }
   });
@@ -172,6 +189,10 @@ function FractalMesh({
       uniformAdaptiveIterations: uniforms.uniformAdaptiveIterations,
       uniformAdaptiveSettledIterations: uniforms.uniformAdaptiveSettledIterations,
       uniformSettleTime: uniforms.uniformSettleTime,
+      uniformInteractiveSteps: uniforms.uniformInteractiveSteps,
+      uniformSettledSteps: uniforms.uniformSettledSteps,
+      uniformInteractiveEpsilon: uniforms.uniformInteractiveEpsilon,
+      uniformSettledEpsilon: uniforms.uniformSettledEpsilon,
       uniformSlicerEnabled: uniforms.uniformSlicerEnabled,
       uniformSlicerOffset: uniforms.uniformSlicerOffset,
       uniformSlicerAxis: int(uniforms.uniformSlicerAxis),
@@ -207,8 +228,12 @@ interface FractalCanvasProps {
   interactionType: number;
   adaptiveIterations: number;        // Max iterations during interaction (targets 30fps)
   adaptiveSettledIterations: number; // Max iterations when settled (targets 15fps)
-  onFrameTime?: (delta: number) => void;
-  settleTime: number;
+  interactiveSteps: number;
+  settledSteps: number;
+  interactiveEpsilon: number;
+  settledEpsilon: number;
+  onFrameTime?: (delta: number, isMoving: boolean) => void;
+  settleTimeRef: React.MutableRefObject<number>;
   isVisible: boolean;
   slicerEnabled: boolean;
   slicerOffset: number;
@@ -259,6 +284,7 @@ export default function FractalCanvas(props: FractalCanvasProps) {
           console.warn(`WebGPU Device Lost: ${info.message}. Reason: ${info.reason}. Restarting renderer...`);
           if (active) {
             setStatusMessage("WEBGPU DEVICE LOST. RESTARTING...");
+            setRoot(null);
             // Delay slightly before retrying to avoid tight loops
             setTimeout(() => {
               if (active) setRetryCount(c => c + 1);

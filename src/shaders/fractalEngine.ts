@@ -20,6 +20,10 @@ export const renderFractal = wgslFn(`
     uniformAdaptiveIterations: f32,
     uniformAdaptiveSettledIterations: f32,
     uniformSettleTime: f32,
+    uniformInteractiveSteps: f32,
+    uniformSettledSteps: f32,
+    uniformInteractiveEpsilon: f32,
+    uniformSettledEpsilon: f32,
     uniformSlicerEnabled: f32,
     uniformSlicerOffset: f32,
     uniformSlicerAxis: i32,
@@ -45,17 +49,18 @@ export const renderFractal = wgslFn(`
     // Dynamic raymarching steps
     // We scale the number of raymarching steps based on whether we are settled or interacting.
     // When settled, we also increase steps at higher zoom levels (lodFactor).
-    let maxSteps = i32(mix(64.0, mix(128.0, 768.0, lodFactor), uniformSettleTime));
+    let baseSteps = mix(uniformInteractiveSteps, mix(uniformInteractiveSteps * 2.0, uniformSettledSteps, lodFactor), uniformSettleTime);
+    let maxSteps = i32(baseSteps);
     
     // --- Raymarching Loop ---
-    for (var i = 0; i < 768; i = i + 1) {
+    for (var i = 0; i < 1024; i = i + 1) {
       if (i >= maxSteps) { break; }
       
       let currentPoint = rayOrigin + rayDirection * totalDist;
       
       // Dynamic precision threshold
       // User requested more conservative threshold when settled to reduce graininess
-      let threshold = max(0.0000001, mix(0.0002, 0.000010, uniformSettleTime) * totalDist / uniformZoom);
+      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist / uniformZoom);
       
       // Transform to global fractal space
       let globalPoint = (currentPoint - uniformOffset) / uniformZoom + uniformOffset;
@@ -72,7 +77,8 @@ export const renderFractal = wgslFn(`
         uniformSlicerAxis,
         uniformInteractionType,
         uniformAdaptiveIterations,
-        uniformAdaptiveSettledIterations
+        uniformAdaptiveSettledIterations,
+        uniformInteracting
       );
       let dist = data.x * uniformZoom;
       
@@ -85,7 +91,7 @@ export const renderFractal = wgslFn(`
       stepCount = i;
       
       // Escape distance
-      if (totalDist > mix(10.0, 20.0, uniformSettleTime)) { break; }
+      if (totalDist > mix(50.0, 100.0, uniformSettleTime)) { break; }
     }
     
     // --- Shading ---
@@ -93,27 +99,31 @@ export const renderFractal = wgslFn(`
       let hitPoint = rayOrigin + rayDirection * totalDist;
       
       // Dynamic precision threshold for normal calculation
-      let threshold = max(0.0000001, mix(0.0002, 0.000010, uniformSettleTime) * totalDist / uniformZoom);
-      let epsilon = max(0.0000001, threshold * 0.5);
+      // We use a larger epsilon for normals than for raymarching to smooth out high-frequency noise
+      // and prevent floating-point precision issues (catastrophic cancellation) at high iterations.
+      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist / uniformZoom);
+      let normalEpsilon = max(0.0001, threshold * 3.0);
       
       // Normal calculation via finite difference
       let pG = (hitPoint - uniformOffset) / uniformZoom + uniformOffset;
-      let hitData = getFractalData(pG, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations);
+      let hitData = getFractalData(pG, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting);
       let dC = hitData.x;
       
-      let pX = (hitPoint + vec3<f32>(epsilon, 0.0, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
-      let dX = getFractalData(pX, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations).x;
+      let pX = (hitPoint + vec3<f32>(normalEpsilon, 0.0, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
+      let dX = getFractalData(pX, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
       
-      let pY = (hitPoint + vec3<f32>(0.0, epsilon, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
-      let dY = getFractalData(pY, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations).x;
+      let pY = (hitPoint + vec3<f32>(0.0, normalEpsilon, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
+      let dY = getFractalData(pY, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
       
-      let pZ = (hitPoint + vec3<f32>(0.0, 0.0, epsilon) - uniformOffset) / uniformZoom + uniformOffset;
-      let dZ = getFractalData(pZ, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations).x;
+      let pZ = (hitPoint + vec3<f32>(0.0, 0.0, normalEpsilon) - uniformOffset) / uniformZoom + uniformOffset;
+      let dZ = getFractalData(pZ, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
       
       let normal = normalize(vec3<f32>(dX, dY, dZ) - dC);
       
       // Lighting components
-      let ambientOcclusion = 1.0 - f32(stepCount) / f32(maxSteps);
+      // Use an exponential decay based on step count for AO, independent of maxSteps
+      // This prevents the image from washing out when maxSteps increases during settling
+      let ambientOcclusion = exp(-f32(stepCount) * 0.015);
       let lightDir = normalize(vec3<f32>(1.0, 1.0, -1.0));
       let diffuse = max(0.0, dot(normal, lightDir)) * 0.6 + 0.4;
       let rim = pow(1.0 - max(0.0, dot(normal, -rayDirection)), 4.0);
@@ -143,10 +153,10 @@ export const renderFractal = wgslFn(`
       }
       
       // Apply stronger color variation based on orbit trap data
-      // Using a non-linear mapping (pow) to make the transitions more dramatic
       let colorFactor = clamp(hitData.y, 0.0, 1.0);
-      let boostedFactor = pow(colorFactor, 0.5); // Boost mid-tones
-      baseColor = mix(baseColor, accentColor, boostedFactor * 0.6);
+      // Use smoothstep instead of pow to avoid amplifying noise at low values
+      let boostedFactor = smoothstep(0.0, 1.0, colorFactor);
+      baseColor = mix(baseColor, accentColor, boostedFactor * 0.8);
       
       // Position-based color variation (very subtle)
       let variation = fract(hitPoint / uniformZoom * 0.2 + 0.5);
@@ -361,33 +371,32 @@ export const renderFractal = wgslFn(`
     slicerAxis: i32,
     uInteractionType: i32,
     uAdaptiveIterations: f32,
-    uAdaptiveSettledIterations: f32
+    uAdaptiveSettledIterations: f32,
+    uInteracting: f32
   ) -> vec2<f32> {
     var data: vec2<f32> = vec2<f32>(10.0, 0.0);
     
+    // If interacting, use uAdaptiveIterations. If settled, use uAdaptiveSettledIterations + zoomLOD bonus.
+    // We don't mix based on settleTime because React smoothly increases uAdaptiveSettledIterations.
+    let baseIter = mix(uAdaptiveSettledIterations, uAdaptiveIterations, uInteracting);
+    
     if (fractalType == 0) {
-      let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.5;
-      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
+      let iter = i32(baseIter + mix(zoomLOD * 0.5, 0.0, uInteracting));
       data = getMandelbulbData(point, params.y, iter);
     } else if (fractalType == 1) {
-      let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.3;
-      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
+      let iter = i32(baseIter + mix(zoomLOD * 0.3, 0.0, uInteracting));
       data = getMengerSpongeData(point, params.y, iter);
     } else if (fractalType == 2) {
-      let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.8;
-      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
+      let iter = i32(baseIter + mix(zoomLOD * 0.8, 0.0, uInteracting));
       data = getJuliaData(point, vec3<f32>(params.z, params.w, 0.1), iter);
     } else if (fractalType == 3) {
-      let settledLimit = uAdaptiveSettledIterations + zoomLOD;
-      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
+      let iter = i32(baseIter + mix(zoomLOD, 0.0, uInteracting));
       data = getSierpinskiData(point, params.y, iter);
     } else if (fractalType == 4) {
-      let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.4;
-      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
+      let iter = i32(baseIter + mix(zoomLOD * 0.4, 0.0, uInteracting));
       data = getMandelboxData(point, params.y, params.z, params.w, iter);
     } else if (fractalType == 5) {
-      let settledLimit = uAdaptiveSettledIterations + zoomLOD * 0.5;
-      let iter = i32(mix(uAdaptiveIterations, settledLimit, settleTime));
+      let iter = i32(baseIter + mix(zoomLOD * 0.5, 0.0, uInteracting));
       data = getApollonianData(point, params.y, iter);
     }
 
