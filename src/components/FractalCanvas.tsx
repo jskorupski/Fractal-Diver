@@ -45,6 +45,7 @@ interface FractalMeshProps {
   slicerEnabled: boolean;
   slicerOffset: number;
   slicerAxis: number;
+  isSettledQualityLocked?: boolean;
   parameters: {
     qualityOffset: number;
     param1: number;
@@ -78,6 +79,7 @@ function FractalMesh({
   slicerEnabled,
   slicerOffset,
   slicerAxis,
+  isSettledQualityLocked,
   parameters
 }: FractalMeshProps) {
   const { size, viewport, invalidate } = useThree();
@@ -170,7 +172,7 @@ function FractalMesh({
     uniforms.uniformSlicerAxis.value = Math.floor(slicerAxis);
     uniforms.uniformParameters.value.set(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3);
     
-    if (isStillSmoothing || isInteracting || settleTimeRef.current < 1.0) {
+    if (isStillSmoothing || isInteracting || (settleTimeRef.current < 1.0 && !isSettledQualityLocked)) {
       invalidate();
     }
   });
@@ -232,6 +234,7 @@ interface FractalCanvasProps {
   settledSteps: number;
   interactiveEpsilon: number;
   settledEpsilon: number;
+  isSettledQualityLocked?: boolean;
   onFrameTime?: (delta: number, isMoving: boolean) => void;
   settleTimeRef: React.MutableRefObject<number>;
   isVisible: boolean;
@@ -265,7 +268,7 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     const canvas = canvasRef.current;
     const r = new WebGPURenderer({ canvas, antialias: false });
     r.setPixelRatio(window.devicePixelRatio);
-    r.setSize(canvas.clientWidth, canvas.clientHeight);
+    r.setSize(canvas.clientWidth, canvas.clientHeight, false);
     rendererRef.current = r;
     
     let active = true;
@@ -337,7 +340,7 @@ export default function FractalCanvas(props: FractalCanvasProps) {
         
         // Update renderer size
         if (rendererRef.current) {
-          rendererRef.current.setSize(width, height);
+          rendererRef.current.setSize(width, height, false);
         }
 
         root.configure({

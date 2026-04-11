@@ -43,6 +43,12 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
 
     // Reset tracking if interaction state changed
     if (isInteracting !== lastInteractionStateRef.current) {
+      if (!isInteracting) {
+        // Transitioning from interacting to settled: inherit interactive state as a starting point
+        state.settledEpsilon = state.interactiveEpsilon;
+        state.settledIterations = state.interactiveIterations;
+        setCurrentValues({ ...state });
+      }
       lastInteractionStateRef.current = isInteracting;
       sampleCountRef.current = 0;
       smoothedDeltaRef.current = delta;
@@ -62,72 +68,34 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
 
     lastUpdateRef.current = now;
 
-    const targetFrameTime = isInteracting ? 1 / 30 : 1 / 15;
+    const targetFrameTime = isInteracting ? 1 / 30 : 1 / 8;
     const error = smoothedDeltaRef.current - targetFrameTime;
     
     // Deadband: 15% of target frame time
     if (Math.abs(error) < targetFrameTime * 0.15) {
-      return; // In the sweet spot, no adjustment needed
+      return false; // In the sweet spot, no adjustment needed
     }
 
-    // Proportional adjustment
-    // Scale the error relative to the target frame time
-    const errorRatio = error / targetFrameTime;
+    // Calculate adjustment multiplier based on performance error
+    const multiplier = calculateAdjustmentMultiplier(error, targetFrameTime, isInteracting);
     
-    // Clamp the multiplier to prevent massive jumps (max 20% change per update)
-    const adjustment = Math.max(-0.2, Math.min(0.2, errorRatio * 0.5));
-    const multiplier = 1 + adjustment;
+    // Split the performance adjustment equally between epsilon and iterations
+    // This ensures we adjust precision and depth in parallel to avoid "blobs"
+    const splitMultiplier = Math.sqrt(multiplier);
 
-    let updated = false;
-
-    if (isInteracting) {
-      if (multiplier > 1) {
-        // Lagging: Increase epsilon first, then decrease iterations
-        if (state.interactiveEpsilon < config.maxInteractiveEpsilon) {
-          state.interactiveEpsilon = Math.min(config.maxInteractiveEpsilon, state.interactiveEpsilon * multiplier);
-          updated = true;
-        } else if (state.interactiveIterations > config.minInteractiveIterations) {
-          state.interactiveIterations = Math.max(config.minInteractiveIterations, Math.floor(state.interactiveIterations / multiplier));
-          updated = true;
-        }
-      } else {
-        // Fast: Decrease epsilon first, then increase iterations
-        if (state.interactiveEpsilon > config.minInteractiveEpsilon) {
-          state.interactiveEpsilon = Math.max(config.minInteractiveEpsilon, state.interactiveEpsilon * multiplier);
-          updated = true;
-        } else if (state.interactiveIterations < config.maxInteractiveIterations) {
-          state.interactiveIterations = Math.min(config.maxInteractiveIterations, Math.ceil(state.interactiveIterations / multiplier));
-          updated = true;
-        }
-      }
-    } else {
-      if (multiplier > 1) {
-        // Lagging: Increase epsilon first, then decrease iterations
-        if (state.settledEpsilon < config.maxSettledEpsilon) {
-          state.settledEpsilon = Math.min(config.maxSettledEpsilon, state.settledEpsilon * multiplier);
-          updated = true;
-        } else if (state.settledIterations > config.minSettledIterations) {
-          state.settledIterations = Math.max(config.minSettledIterations, Math.floor(state.settledIterations / multiplier));
-          updated = true;
-        }
-      } else {
-        // Fast: Decrease epsilon first, then increase iterations
-        if (state.settledEpsilon > config.minSettledEpsilon) {
-          state.settledEpsilon = Math.max(config.minSettledEpsilon, state.settledEpsilon * multiplier);
-          updated = true;
-        } else if (state.settledIterations < config.maxSettledIterations) {
-          state.settledIterations = Math.min(config.maxSettledIterations, Math.ceil(state.settledIterations / multiplier));
-          updated = true;
-        }
-      }
-    }
+    const updated = applyPerformanceAdjustment(state, config, multiplier, splitMultiplier, isInteracting);
 
     if (updated) {
       setCurrentValues({ ...state });
     }
+    
+    return updated;
   }, [fractalType, isInteracting]);
 
-  // Function to manually override values (e.g., from DebugPanel)
+  /**
+   * Manually override performance adaptation values.
+   * Useful for debug controls or specific scene requirements.
+   */
   const overrideKnobs = useCallback((knobs: Partial<AdaptationState>) => {
     const state = stateRef.current[fractalType];
     let updated = false;
@@ -160,4 +128,74 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
     overrideKnobs,
     smoothedDelta: smoothedDeltaRef.current
   };
+}
+
+/**
+ * Calculates a performance adjustment multiplier based on the current frame time error.
+ */
+function calculateAdjustmentMultiplier(error: number, targetFrameTime: number, isInteracting: boolean): number {
+  // Scale the error relative to the target frame time
+  const errorRatio = error / targetFrameTime;
+  
+  // Gain and clamp: More aggressive recovery when settled
+  const gain = isInteracting ? 0.5 : 0.8;
+  const maxAdjustment = isInteracting ? 0.2 : 0.4;
+  
+  const adjustment = Math.max(-maxAdjustment, Math.min(maxAdjustment, errorRatio * gain));
+  return 1 + adjustment;
+}
+
+/**
+ * Applies performance adjustments to the adaptation state.
+ * Returns true if any values were actually changed.
+ */
+function applyPerformanceAdjustment(
+  state: AdaptationState, 
+  config: any, 
+  multiplier: number, 
+  splitMultiplier: number, 
+  isInteracting: boolean
+): boolean {
+  let updated = false;
+
+  if (isInteracting) {
+    if (multiplier > 1) {
+      // Lagging: Decrease quality (increase epsilon, decrease iterations)
+      if (state.interactiveEpsilon < config.maxInteractiveEpsilon) {
+        state.interactiveEpsilon = Math.min(config.maxInteractiveEpsilon, state.interactiveEpsilon * splitMultiplier);
+        updated = true;
+      }
+      if (state.interactiveIterations > config.minInteractiveIterations) {
+        state.interactiveIterations = Math.max(config.minInteractiveIterations, Math.floor(state.interactiveIterations / splitMultiplier));
+        updated = true;
+      }
+    } else {
+      // Fast: Increase quality (decrease epsilon, increase iterations)
+      if (state.interactiveEpsilon > config.minInteractiveEpsilon) {
+        state.interactiveEpsilon = Math.max(config.minInteractiveEpsilon, state.interactiveEpsilon * splitMultiplier);
+        updated = true;
+      }
+      if (state.interactiveIterations < config.maxInteractiveIterations) {
+        state.interactiveIterations = Math.min(config.maxInteractiveIterations, Math.ceil(state.interactiveIterations / splitMultiplier));
+        updated = true;
+      }
+    }
+  } else {
+    // Settled mode: Only increase quality if we have frame budget
+    if (multiplier < 1) {
+      // Fast: Increase quality (decrease epsilon, increase iterations)
+      if (state.settledEpsilon > config.minSettledEpsilon) {
+        state.settledEpsilon = Math.max(config.minSettledEpsilon, state.settledEpsilon * splitMultiplier);
+        updated = true;
+      }
+      if (state.settledIterations < config.maxSettledIterations) {
+        state.settledIterations = Math.min(config.maxSettledIterations, Math.ceil(state.settledIterations / splitMultiplier));
+        updated = true;
+      }
+    }
+    // Note: We never decrease quality in settled mode to hit a frame rate target,
+    // as we prefer a high-quality static image over a fast-rendering one.
+  }
+
+  return updated;
 }

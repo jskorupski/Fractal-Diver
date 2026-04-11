@@ -61,6 +61,7 @@ describe('FractalCanvas Component', () => {
     parameters: { qualityOffset: 0, param1: 0, param2: 0, param3: 0 },
     isInteracting: false,
     interactionType: 0,
+    isSettledQualityLocked: false,
     adaptiveIterations: 10,
     adaptiveSettledIterations: 20,
     interactiveSteps: 128,
