@@ -2,9 +2,9 @@
 
 <img src="logo.svg" alt="Fractal Diver Logo" width="256" />
 
-> **Dive into the infinite.** A high-performance, real-time 3D fractal explorer powered by WebGPU and Three.js.
+> **Dive into the infinite.** A high-performance, real-time 3D fractal explorer powered by WebGPU and WGSL.
 
-Fractal Diver allows users to explore complex mathematical structures in three dimensions. Using the latest WebGPU technology via Three.js TSL (Three Shading Language), it renders stunning fractals with incredible detail and fluid performance. Built in [AI Studio](https://ai.studio).
+Fractal Diver allows users to explore complex mathematical structures in three dimensions. Using the latest WebGPU technology and custom WGSL raymarching shaders, it renders stunning fractals with incredible detail and fluid performance. Built in [AI Studio](https://ai.studio).
 
 ---
 
@@ -12,25 +12,31 @@ Fractal Diver allows users to explore complex mathematical structures in three d
 
 ## Features
 
-- **Real-time 3D Raymarching**: Explore fractals like the Mandelbulb, Menger Sponge, and Mandelbox in full 3D.
-- **WebGPU Powered**: Leverages the next generation of web graphics for high-fidelity rendering.
+- **Real-time 3D Raymarching**: Explore 6 distinct fractal types in full 3D:
+  - Mandelbulb
+  - Menger Sponge
+  - Julia Set
+  - Sierpinski Tetrahedron
+  - Mandelbox
+  - Apollonian Gasket
+- **WebGPU Powered**: Leverages the next generation of web graphics with custom WGSL shaders for high-fidelity, hardware-accelerated rendering.
+- **Adaptive Performance Engine**: Features a custom PD-controller that dynamically adjusts raymarching iterations and precision (epsilon) in real-time to maintain smooth framerates (30fps during interaction, prioritizing quality when settled).
 - **Cinematic Camera**: Smooth, fluid navigation with zoom-aware sensitivity and SLERP-based rotations.
-- **Interactive Parameters**: Fine-tune fractal shapes, iteration depth, and mathematical constants in real-time.
-- **Dynamic Slicing**: Cut through 3D structures to reveal their internal complexity.
-- **Progressive Detail**: Intelligently balances performance during interaction and visual quality when settled.
+- **Interactive Parameters**: Fine-tune fractal shapes, scale, and mathematical constants in real-time.
+- **Dynamic Slicing**: Cut through 3D structures along any axis to reveal their internal complexity.
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript
-- **Rendering**: Three.js + WebGPU (TSL)
+- **Frontend**: React + TypeScript + Vite
+- **Rendering**: WebGPU + WGSL (Custom Raymarching Engine)
+- **Math/Camera**: Three.js (used for matrix math and camera state, not rendering)
 - **Styling**: Tailwind CSS
-- **Motion**: Framer Motion (motion/react)
 - **Testing**: Vitest + Testing Library
 
 ## Controls
 
-- **Rotate**: Left-click and drag
-- **Pan**: Shift + Left-click and drag (or three-finger touch)
+- **Rotate**: Left-click and drag (or 1-finger drag)
+- **Pan**: Shift + Left-click and drag (or 2-finger drag)
 - **Zoom**: Scroll wheel (or pinch-to-zoom)
 - **Reset**: Click the "Reset" button to return to the default view
 
@@ -65,4 +71,3 @@ npm test
 ## License
 
 This project is licensed under the Apache-2.0 License.
-
