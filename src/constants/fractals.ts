@@ -97,7 +97,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.002,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 5.0, param2: 0, param3: 0 },
+    parameters: { param1: 3.3, param2: 0, param3: 0 },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "2": { // Julia Set
