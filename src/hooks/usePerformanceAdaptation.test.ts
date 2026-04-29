@@ -100,10 +100,11 @@ describe('usePerformanceAdaptation Hook', () => {
     const highQualityEpsilon = result.current.settledEpsilon;
     expect(highQualityEpsilon).toBeLessThan(0.0005);
 
-    // Now simulate severe lag in settled mode
+    // Now simulate severe lag in settled mode (500ms > 2.5x the 100ms settled target)
     act(() => {
       const now = performance.now();
-      for (let i = 0; i < 20; i++) {
+      // Increase iterations to 60 to overcome the larger (15 frame) window and dampened multiplier
+      for (let i = 0; i < 60; i++) {
         result.current.onFrameTime(0.5, now + i * 500);
       }
     });

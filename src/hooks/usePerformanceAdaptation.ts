@@ -67,14 +67,20 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
     // Exponential Moving Average (EMA) for frame delta to smooth out jitter
     sampleCountRef.current++;
     
-    // Use a smaller window when settled (5 frames) vs interacting (30 frames).
-    // This allows the "settling" phase to react much faster to its higher-cost frames.
-    const windowSize = isInteracting ? 30 : 5;
-    let alpha = 1.0 / Math.min(sampleCountRef.current, windowSize);
+    // Asymmetric EMA window:
+    // When performance improves (delta < current average), use a larger window for stability.
+    // When performance degrades (delta > current average), use a smaller window to react faster to lag.
+    const baseWindowSize = isInteracting ? 30 : 15;
+    const isLaggingRelative = delta > smoothedDeltaRef.current;
+    
+    // React ~3x faster to performance degradation than to improvements
+    const effectiveWindowSize = isLaggingRelative ? Math.max(2, baseWindowSize / 3) : baseWindowSize;
+    let alpha = 1.0 / Math.min(sampleCountRef.current, effectiveWindowSize);
     
     // React instantly to severe lag spikes (sudden drops in FPS) to prevent UI freezes
+    // If a frame is > 1.5x the average AND > 100ms, we force immediate reaction
     if (delta > smoothedDeltaRef.current * 1.5 && delta > 0.1) {
-      alpha = 0.8; 
+      alpha = 0.9; 
     }
     
     smoothedDeltaRef.current = smoothedDeltaRef.current * (1 - alpha) + delta * alpha;
@@ -218,16 +224,18 @@ function applyPerformanceAdjustment(
         state.settledIterations = Math.min(config.maxSettledIterations, Math.ceil(state.settledIterations / splitMultiplier));
         updated = true;
       }
-    } else if (multiplier > 1.2) {
-      // Lagging significantly: Decrease settled quality if it has exceeded the floor.
-      // CRITICAL: Settled quality never drops below interactive quality levels.
-      // This prevents the "snapping to worse quality" bug reported by the user.
+    } else if (multiplier > 2.5) {
+      // Severe lag in settled mode: Slowly decrease settled quality if it has exceeded the floor.
+      // We only do this if it's struggling significantly (e.g. > 250ms per frame).
+      // We also use a dampened multiplier (Math.pow(splitMultiplier, 0.5)) to avoid snapping.
+      const dampenedMultiplier = Math.pow(splitMultiplier, 0.5);
+      
       if (state.settledEpsilon < state.interactiveEpsilon) {
-        state.settledEpsilon = Math.min(state.interactiveEpsilon, state.settledEpsilon * splitMultiplier);
+        state.settledEpsilon = Math.min(state.interactiveEpsilon, state.settledEpsilon * dampenedMultiplier);
         updated = true;
       }
       if (state.settledIterations > state.interactiveIterations) {
-        state.settledIterations = Math.max(state.interactiveIterations, Math.floor(state.settledIterations / splitMultiplier));
+        state.settledIterations = Math.max(state.interactiveIterations, Math.floor(state.settledIterations / dampenedMultiplier));
         updated = true;
       }
     }
