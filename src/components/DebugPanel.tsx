@@ -80,16 +80,13 @@ export default function DebugPanel({
       fps: fpsRef.current,
       renderCount: renderCountRef.current,
     });
-    requestRef.current = requestAnimationFrame(updateValues);
   };
 
   useEffect(() => {
     if ((import.meta as any).env?.MODE === 'test') return;
-    requestRef.current = requestAnimationFrame(updateValues);
-    return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
-    };
-  }, []); // Empty dependency array because we use propsRef and refs
+    const interval = setInterval(updateValues, 500);
+    return () => clearInterval(interval);
+  }, []);
 
   if ((import.meta as any).env?.MODE === 'test') return null;
 

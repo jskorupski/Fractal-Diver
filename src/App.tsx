@@ -178,11 +178,14 @@ export default function App() {
   // Handle window resize to reset settled quality lock
   useEffect(() => {
     let lastWidth = window.innerWidth;
+    let lastHeight = window.innerHeight;
     const handleResize = () => {
       const newWidth = window.innerWidth;
-      if (Math.abs(newWidth - lastWidth) > 5) {
+      const newHeight = window.innerHeight;
+      if (Math.abs(newWidth - lastWidth) > 5 || Math.abs(newHeight - lastHeight) > 5) {
         setIsSettledQualityLocked(false);
         lastWidth = newWidth;
+        lastHeight = newHeight;
       }
     };
     window.addEventListener('resize', handleResize);
@@ -213,7 +216,13 @@ export default function App() {
   const handleFrameTime = useCallback((delta: number, isMoving: boolean) => {
     const now = performance.now();
     
-    // FPS Tracking
+    // Adapt performance
+    // If not interacting and quality is locked, we completely freeze the frame counter and performance adjustment
+    if (!isInteracting && isSettledQualityLocked && !isMoving) {
+      return;
+    }
+
+    // FPS Tracking (Only done if we are actually evaluating frames)
     renderCountRef.current = (renderCountRef.current + 1) % 100;
     framesSinceLastFpsRef.current++;
     if (now - lastFpsTimeRef.current >= 1000) {
@@ -231,13 +240,10 @@ export default function App() {
       settleTimeRef.current = Math.min(1.0, settleTimeRef.current + delta * 2.5);
     }
 
-    // Adapt performance
-    if (!isInteracting && isSettledQualityLocked) return;
-
     const updated = onFrameTime(delta, now);
 
-    // Lock quality if adaptation is complete
-    if (!isInteracting && !updated && settleTimeRef.current >= 1.0 && !isActuallyMoving) {
+    // Lock quality if adaptation is complete (false means finished/in deadband, 'waiting' means keep adapting, true means adapted this frame)
+    if (!isInteracting && updated === false && settleTimeRef.current >= 1.0 && !isActuallyMoving) {
       setIsSettledQualityLocked(true);
     }
   }, [isInteracting, onFrameTime, isSettledQualityLocked, lastActualMoveTimeRef]);

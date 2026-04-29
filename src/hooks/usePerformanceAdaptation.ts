@@ -61,10 +61,10 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
     smoothedDeltaRef.current = smoothedDeltaRef.current * (1 - alpha) + delta * alpha;
 
     // Throttle adaptation updates to ~15Hz (66ms) to allow React/WebGPU to catch up
-    if (now - lastUpdateRef.current < 66) return;
+    if (now - lastUpdateRef.current < 66) return 'waiting';
     
     // Wait for at least a few samples before adapting
-    if (sampleCountRef.current < 3) return;
+    if (sampleCountRef.current < 3) return 'waiting';
 
     lastUpdateRef.current = now;
 

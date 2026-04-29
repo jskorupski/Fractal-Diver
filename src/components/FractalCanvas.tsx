@@ -129,9 +129,9 @@ function FractalMesh({
   useFrame((_state, delta) => {
     // If we are still smoothing, keep invalidating
     const isStillSmoothing = 
-      Math.abs(smoothedZoom.current - zoom) > 0.0001 ||
-      smoothedOffset.current.distanceTo(offset) > 0.0001 ||
-      smoothedRotation.current.angleTo(targetRotation) > 0.0001;
+      Math.abs(smoothedZoom.current - zoom) > 0.0005 ||
+      smoothedOffset.current.distanceTo(offset) > 0.0005 ||
+      smoothedRotation.current.angleTo(targetRotation) > 0.0005;
 
     // Report frame time for adaptive iterations
     // Only report if delta is reasonable (e.g. < 0.5s) to avoid huge spikes from tab switching or idle
@@ -144,13 +144,25 @@ function FractalMesh({
     const lerpFactor = 1.0 - Math.exp(-12 * delta);
     
     // Zoom smoothing
-    smoothedZoom.current = THREE.MathUtils.lerp(smoothedZoom.current, zoom, lerpFactor);
+    if (Math.abs(smoothedZoom.current - zoom) < 0.0005) {
+      smoothedZoom.current = zoom;
+    } else {
+      smoothedZoom.current = THREE.MathUtils.lerp(smoothedZoom.current, zoom, lerpFactor);
+    }
     
     // Offset smoothing
-    smoothedOffset.current.lerp(offset, lerpFactor);
+    if (smoothedOffset.current.distanceTo(offset) < 0.0005) {
+      smoothedOffset.current.copy(offset);
+    } else {
+      smoothedOffset.current.lerp(offset, lerpFactor);
+    }
     
     // Rotation smoothing (SLERP)
-    smoothedRotation.current.slerp(targetRotation, lerpFactor);
+    if (smoothedRotation.current.angleTo(targetRotation) < 0.0005) {
+      smoothedRotation.current.copy(targetRotation);
+    } else {
+      smoothedRotation.current.slerp(targetRotation, lerpFactor);
+    }
     
     // Update uniforms
     uniforms.uniformType.value = Math.floor(fractalType);
@@ -172,7 +184,7 @@ function FractalMesh({
     uniforms.uniformSlicerAxis.value = Math.floor(slicerAxis);
     uniforms.uniformParameters.value.set(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3);
     
-    if (isStillSmoothing || isInteracting || (settleTimeRef.current < 1.0 && !isSettledQualityLocked)) {
+    if (isStillSmoothing || isInteracting || !isSettledQualityLocked) {
       invalidate();
     }
   });
@@ -344,6 +356,7 @@ export default function FractalCanvas(props: FractalCanvasProps) {
         }
 
         root.configure({
+          frameloop: 'demand',
           size: { width, height, top: 0, left: 0 }
         });
       };
