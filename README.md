@@ -4,6 +4,8 @@
 
 > **Dive into the infinite.** A high-performance, real-time 3D fractal explorer powered by WebGPU and WGSL.
 
+**Live Demo:** [fractal.skorupski.org](https://fractal.skorupski.org)
+
 Fractal Diver allows users to explore complex mathematical structures in three dimensions. Using the latest WebGPU technology and custom WGSL raymarching shaders, it renders stunning fractals with incredible detail and fluid performance. Built in [AI Studio](https://ai.studio).
 
 ---
