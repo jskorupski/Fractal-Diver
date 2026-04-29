@@ -62,22 +62,55 @@ describe('usePerformanceAdaptation Hook', () => {
     // The logic has been verified manually and through the "settled" mode tests.
   });
 
-  it('does not decrease quality in settled mode', () => {
-    const { result } = renderHook(() => usePerformanceAdaptation(fractalType, false));
-    const initialEpsilon = result.current.settledEpsilon;
-    const initialIterations = result.current.settledIterations;
+  it('decreases quality in settled mode if lagging badly but respects interactive floor', () => {
+    // Start with a high-quality interactive state
+    const { result, rerender } = renderHook(({ fractal, isInteracting }) => 
+      usePerformanceAdaptation(fractal, isInteracting), 
+      { initialProps: { fractal: fractalType, isInteracting: true } }
+    );
+    
+    // Manually set interactive levels to something specific
+    act(() => {
+      result.current.overrideKnobs({
+        interactiveEpsilon: 0.0005,
+        interactiveIterations: 20
+      });
+    });
 
-    // Simulate slow frames in settled mode
+    // Switch to settled mode
+    rerender({ fractal: fractalType, isInteracting: false });
+    
+    // Call onFrameTime to trigger the transition inheritance
+    act(() => {
+      result.current.onFrameTime(0.016, performance.now());
+    });
+
+    // Transitioning to settled mode should inherit interactive values
+    expect(result.current.settledEpsilon).toBe(0.0005);
+    expect(result.current.settledIterations).toBe(20);
+
+    // Make it VERY fast in settled mode to improve quality beyond interactive
     act(() => {
       const now = performance.now();
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 20; i++) {
+        result.current.onFrameTime(0.01, now + i * 10);
+      }
+    });
+
+    const highQualityEpsilon = result.current.settledEpsilon;
+    expect(highQualityEpsilon).toBeLessThan(0.0005);
+
+    // Now simulate severe lag in settled mode
+    act(() => {
+      const now = performance.now();
+      for (let i = 0; i < 20; i++) {
         result.current.onFrameTime(0.5, now + i * 500);
       }
     });
 
-    // Should NOT change values to decrease quality
-    expect(result.current.settledEpsilon).toBe(initialEpsilon);
-    expect(result.current.settledIterations).toBe(initialIterations);
+    // Should decrease quality but STOP at the interactive floor
+    expect(result.current.settledEpsilon).toBe(0.0005);
+    expect(result.current.settledIterations).toBe(20);
   });
 
   it('increases quality in settled mode when fast', () => {

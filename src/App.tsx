@@ -212,17 +212,20 @@ export default function App() {
 
   /**
    * Callback for frame timings from the renderer.
+   * This is the "Pulse" of the application, orchestrating performance adaptation,
+   * smooth transitions ("settling"), and background quality locking.
    */
   const handleFrameTime = useCallback((delta: number, isMoving: boolean) => {
     const now = performance.now();
     
-    // Adapt performance
-    // If not interacting and quality is locked, we completely freeze the frame counter and performance adjustment
+    // Performance optimization: 
+    // If not interacting and quality is already locked (maximum quality for current view reached),
+    // we stop updating timers and adaptation logic to save CPU/Battery.
     if (!isInteracting && isSettledQualityLocked && !isMoving) {
       return;
     }
 
-    // FPS Tracking (Only done if we are actually evaluating frames)
+    // FPS Tracking (Updated every 1000ms)
     renderCountRef.current = (renderCountRef.current + 1) % 100;
     framesSinceLastFpsRef.current++;
     if (now - lastFpsTimeRef.current >= 1000) {
@@ -231,18 +234,26 @@ export default function App() {
       lastFpsTimeRef.current = now;
     }
 
+    // isActuallyMoving determines if we are still visually updating (momentum zoom, etc)
     const isActuallyMoving = (now - lastActualMoveTimeRef.current < 100) || isMoving;
     
-    // Smoothly transition settleTime
+    // Smoothly transition settleTime from 0.0 (interactive) to 1.0 (settled).
+    // This TSL uniform is used in shaders to interpolate between interactive and settled precision.
     if (isInteracting) {
       settleTimeRef.current = 0;
     } else {
       settleTimeRef.current = Math.min(1.0, settleTimeRef.current + delta * 2.5);
     }
 
+    // Pipe the frame time into the performance adaptation hook
     const updated = onFrameTime(delta, now);
 
-    // Lock quality if adaptation is complete (false means finished/in deadband, 'waiting' means keep adapting, true means adapted this frame)
+    // Locking Logic:
+    // We lock the quality if:
+    // 1. User is not interacting.
+    // 2. The adaptation hook reports it has reached a stable point (updated === false).
+    // 3. The visual transition to settled mode is complete (settleTime === 1.0).
+    // 4. There is no background movement (momentum/animation).
     if (!isInteracting && updated === false && settleTimeRef.current >= 1.0 && !isActuallyMoving) {
       setIsSettledQualityLocked(true);
     }
@@ -251,8 +262,13 @@ export default function App() {
   // --- Render Calculations ---
   const currentView = fractalViews[fractalType];
   const { zoom, offset, rotation, parameters, slicer } = currentView;
+  
+  // zoomFactor represents the doubling of magnification.
+  // We use this to provide a "Manual LOD Boost" that stacks with the adaptive systems.
   const zoomFactor = Math.log2(Math.max(1, zoom));
 
+  // Boost iterations as we zoom in to maintain surface detail at extreme scales.
+  // This is clamped at +24 iterations to prevent runaway performance costs at high zoom.
   const finalInteractiveIterations = Math.max(interactiveIterations, interactiveIterations + Math.min(24, zoomFactor * 2.0));
   const finalSettledIterations = Math.max(settledIterations, settledIterations + Math.min(24, zoomFactor * 3.0));
 

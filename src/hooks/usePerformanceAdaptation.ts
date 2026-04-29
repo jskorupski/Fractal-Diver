@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { FRACTAL_CONFIGS } from '../constants/fractals';
+import { FRACTAL_CONFIGS, type FractalConfig } from '../constants/fractals';
 
 interface AdaptationState {
   interactiveEpsilon: number;
@@ -8,11 +8,16 @@ interface AdaptationState {
   settledIterations: number;
 }
 
+/**
+ * Hook to manage performance adaptation logic.
+ * It tracks frame times and adjusts fractal quality parameters (epsilon and iterations)
+ * to maintain a target frame rate, while ensuring quality never drops below interactive levels.
+ */
 export function usePerformanceAdaptation(fractalType: number, isInteracting: boolean) {
-  // Store state for all fractals so switching doesn't reset them
+  // Store state for all fractals in a ref so switching fractals doesn't lose the learned performance state
   const stateRef = useRef<Record<number, AdaptationState>>({});
 
-  // Initialize state if missing
+  // Initialize state if missing for this specific fractal
   if (!stateRef.current[fractalType]) {
     const config = FRACTAL_CONFIGS[fractalType.toString()];
     stateRef.current[fractalType] = {
@@ -23,7 +28,7 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
     };
   }
 
-  // React state to trigger re-renders when values change significantly
+  // React state to trigger re-renders when adaptation values change
   const [currentValues, setCurrentValues] = useState<AdaptationState>(stateRef.current[fractalType]);
 
   // Sync state when fractalType changes
@@ -31,20 +36,25 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
     setCurrentValues(stateRef.current[fractalType]);
   }, [fractalType]);
 
-  // Throttling and tracking refs
+  // Performance tracking refs
   const lastUpdateRef = useRef<number>(0);
   const smoothedDeltaRef = useRef<number>(0);
   const sampleCountRef = useRef<number>(0);
   const lastInteractionStateRef = useRef<boolean>(isInteracting);
 
+  /**
+   * Called every frame with the time taken for the previous frame.
+   * Updates the adaptive parameters if necessary.
+   */
   const onFrameTime = useCallback((delta: number, now: number) => {
     const config = FRACTAL_CONFIGS[fractalType.toString()];
     const state = stateRef.current[fractalType];
 
-    // Reset tracking if interaction state changed
+    // Reset tracking if interaction state changed (e.g., user started/stopped dragging)
     if (isInteracting !== lastInteractionStateRef.current) {
       if (!isInteracting) {
-        // Transitioning from interacting to settled: inherit interactive state as a starting point
+        // Transitioning from interacting to settled: inherit interactive state as a starting point.
+        // This ensures the transition is smooth and doesn't jump to a lower quality.
         state.settledEpsilon = state.interactiveEpsilon;
         state.settledIterations = state.interactiveIterations;
         setCurrentValues({ ...state });
@@ -54,33 +64,44 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
       smoothedDeltaRef.current = delta;
     }
 
-    // Exponential Moving Average (EMA) for frame delta
-    // Starts with high weight for new samples, then settles to ~1 second window
+    // Exponential Moving Average (EMA) for frame delta to smooth out jitter
     sampleCountRef.current++;
-    const alpha = 1.0 / Math.min(sampleCountRef.current, 30);
+    
+    // Use a smaller window when settled (5 frames) vs interacting (30 frames).
+    // This allows the "settling" phase to react much faster to its higher-cost frames.
+    const windowSize = isInteracting ? 30 : 5;
+    let alpha = 1.0 / Math.min(sampleCountRef.current, windowSize);
+    
+    // React instantly to severe lag spikes (sudden drops in FPS) to prevent UI freezes
+    if (delta > smoothedDeltaRef.current * 1.5 && delta > 0.1) {
+      alpha = 0.8; 
+    }
+    
     smoothedDeltaRef.current = smoothedDeltaRef.current * (1 - alpha) + delta * alpha;
 
-    // Throttle adaptation updates to ~15Hz (66ms) to allow React/WebGPU to catch up
+    // Throttle checks to 15Hz to avoid excessive React state updates
     if (now - lastUpdateRef.current < 66) return 'waiting';
     
-    // Wait for at least a few samples before adapting
-    if (sampleCountRef.current < 3) return 'waiting';
+    // Wait for at least a few samples before making decisions, unless we hit extreme lag
+    if (sampleCountRef.current < 3 && !(!isInteracting && delta > 0.1)) return 'waiting';
 
     lastUpdateRef.current = now;
 
-    const targetFrameTime = isInteracting ? 1 / 30 : 1 / 8;
+    // Interactive target: 30fps. Settled target: 10fps.
+    // Settled mode is allowed to be much heavier to produce high-quality final images.
+    const targetFrameTime = isInteracting ? 1 / 30 : 1 / 10; 
     const error = smoothedDeltaRef.current - targetFrameTime;
     
-    // Deadband: 15% of target frame time
+    // Deadband: Avoid small oscillations if performance is within 15% of target
     if (Math.abs(error) < targetFrameTime * 0.15) {
-      return false; // In the sweet spot, no adjustment needed
+      return false; 
     }
 
-    // Calculate adjustment multiplier based on performance error
+    // Calculate how much we need to adjust parameters
     const multiplier = calculateAdjustmentMultiplier(error, targetFrameTime, isInteracting);
     
-    // Split the performance adjustment equally between epsilon and iterations
-    // This ensures we adjust precision and depth in parallel to avoid "blobs"
+    // Split the adjustment equally between epsilon (precision) and iterations (depth).
+    // Adjusting them together prevents the "blobby but detailed" or "noisy but sharp" looks.
     const splitMultiplier = Math.sqrt(multiplier);
 
     const updated = applyPerformanceAdjustment(state, config, multiplier, splitMultiplier, isInteracting);
@@ -94,7 +115,7 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
 
   /**
    * Manually override performance adaptation values.
-   * Useful for debug controls or specific scene requirements.
+   * Useful for debug controls or resetting to known states.
    */
   const overrideKnobs = useCallback((knobs: Partial<AdaptationState>) => {
     const state = stateRef.current[fractalType];
@@ -134,24 +155,29 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
  * Calculates a performance adjustment multiplier based on the current frame time error.
  */
 function calculateAdjustmentMultiplier(error: number, targetFrameTime: number, isInteracting: boolean): number {
-  // Scale the error relative to the target frame time
   const errorRatio = error / targetFrameTime;
   
-  // Gain and clamp: More aggressive recovery when settled
-  const gain = isInteracting ? 0.5 : 0.8;
-  const maxAdjustment = isInteracting ? 0.2 : 0.4;
+  // Use higher gain and larger caps when settled to allow for faster quality ramp-up
+  let gain = isInteracting ? 0.5 : 0.8;
+  let maxAdjustment = isInteracting ? 0.25 : 0.4;
+  
+  // High-performance catch-up: if we are lagging by more than 2 target frames (e.g., 3x logic time)
+  if (errorRatio > 2.0) {
+    maxAdjustment = Math.min(2.0, errorRatio * 0.5); 
+    gain = 1.0;
+  }
   
   const adjustment = Math.max(-maxAdjustment, Math.min(maxAdjustment, errorRatio * gain));
   return 1 + adjustment;
 }
 
 /**
- * Applies performance adjustments to the adaptation state.
- * Returns true if any values were actually changed.
+ * Applies performance adjustments to the state based on calculated multipliers.
+ * Returns true if the state was updated.
  */
 function applyPerformanceAdjustment(
   state: AdaptationState, 
-  config: any, 
+  config: FractalConfig, 
   multiplier: number, 
   splitMultiplier: number, 
   isInteracting: boolean
@@ -181,7 +207,7 @@ function applyPerformanceAdjustment(
       }
     }
   } else {
-    // Settled mode: Only increase quality if we have frame budget
+    // Settled mode: Usually only increases quality, unless the system is severely struggling.
     if (multiplier < 1) {
       // Fast: Increase quality (decrease epsilon, increase iterations)
       if (state.settledEpsilon > config.minSettledEpsilon) {
@@ -192,9 +218,19 @@ function applyPerformanceAdjustment(
         state.settledIterations = Math.min(config.maxSettledIterations, Math.ceil(state.settledIterations / splitMultiplier));
         updated = true;
       }
+    } else if (multiplier > 1.2) {
+      // Lagging significantly: Decrease settled quality if it has exceeded the floor.
+      // CRITICAL: Settled quality never drops below interactive quality levels.
+      // This prevents the "snapping to worse quality" bug reported by the user.
+      if (state.settledEpsilon < state.interactiveEpsilon) {
+        state.settledEpsilon = Math.min(state.interactiveEpsilon, state.settledEpsilon * splitMultiplier);
+        updated = true;
+      }
+      if (state.settledIterations > state.interactiveIterations) {
+        state.settledIterations = Math.max(state.interactiveIterations, Math.floor(state.settledIterations / splitMultiplier));
+        updated = true;
+      }
     }
-    // Note: We never decrease quality in settled mode to hit a frame rate target,
-    // as we prefer a high-quality static image over a fast-rendering one.
   }
 
   return updated;

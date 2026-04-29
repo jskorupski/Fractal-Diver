@@ -60,7 +60,7 @@ export const renderFractal = wgslFn(`
       
       // Dynamic precision threshold
       // User requested more conservative threshold when settled to reduce graininess
-      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist / uniformZoom);
+      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist);
       
       // Transform to global fractal space
       let globalPoint = (currentPoint - uniformOffset) / uniformZoom + uniformOffset;
@@ -101,10 +101,12 @@ export const renderFractal = wgslFn(`
       // Dynamic precision threshold for normal calculation
       // We use a larger epsilon for normals than for raymarching to smooth out high-frequency noise
       // and prevent floating-point precision issues (catastrophic cancellation) at high iterations.
-      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist / uniformZoom);
+      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist);
+      // normalEpsilon is scaled by threshold to ensure we sample far enough away to get a valid gradient
       let normalEpsilon = max(0.0001, threshold * 3.0);
       
-      // Normal calculation via finite difference
+      // Normal calculation via finite difference (central difference would be 6 samples, 
+      // but we use 4 samples/forward difference for performance)
       let pG = (hitPoint - uniformOffset) / uniformZoom + uniformOffset;
       let hitData = getFractalData(pG, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting);
       let dC = hitData.x;
@@ -121,14 +123,17 @@ export const renderFractal = wgslFn(`
       let normal = normalize(vec3<f32>(dX, dY, dZ) - dC);
       
       // Lighting components
-      // Use an exponential decay based on step count for AO, independent of maxSteps
-      // This prevents the image from washing out when maxSteps increases during settling
+      // Ambient Occlusion: Use an exponential decay based on total raymarching step count.
+      // High step counts (deep in crevasses) result in darker colors.
       let ambientOcclusion = exp(-f32(stepCount) * 0.015);
+      
       let lightDir = normalize(vec3<f32>(1.0, 1.0, -1.0));
       let diffuse = max(0.0, dot(normal, lightDir)) * 0.6 + 0.4;
+      
+      // Rim Lighting: Adds a subtle glow at the edges of the fractal for better depth perception.
       let rim = pow(1.0 - max(0.0, dot(normal, -rayDirection)), 4.0);
       
-      // Color selection with subtle palettes
+      // Fractal Palettes: Each type gets a distinct primary and accent color.
       var baseColor = vec3<f32>(0.4, 0.6, 1.0); // Default Blue
       var accentColor = vec3<f32>(0.2, 0.4, 0.8);
       
@@ -152,20 +157,20 @@ export const renderFractal = wgslFn(`
         accentColor = vec3<f32>(0.5, 0.3, 0.1);
       }
       
-      // Apply stronger color variation based on orbit trap data
+      // Orbit Trap Coloring: Uses the auxiliary data from distance estimation (e.g. min radius reached)
+      // to mix the accent color into the base color.
       let colorFactor = clamp(hitData.y, 0.0, 1.0);
-      // Use smoothstep instead of pow to avoid amplifying noise at low values
       let boostedFactor = smoothstep(0.0, 1.0, colorFactor);
       baseColor = mix(baseColor, accentColor, boostedFactor * 0.8);
       
-      // Position-based color variation (very subtle)
+      // Position-based color variation: adds extremely subtle texture to plain surfaces.
       let variation = fract(hitPoint / uniformZoom * 0.2 + 0.5);
       baseColor = mix(baseColor, variation, 0.08);
       
       let finalColor = (baseColor * diffuse + rim * 0.4) * ambientOcclusion;
       
-      // Depth fog - adjusted for better brightness at a distance
-      // We use a softer exponent and a small constant boost
+      // Depth fog: Adjusted for better readability at a distance.
+      // Fog reduces contrast for very far objects without making them pure black instantly.
       let fogFactor = exp(-0.25 * totalDist) + 0.05;
       return vec4<f32>(finalColor * fogFactor, 1.0);
     }
