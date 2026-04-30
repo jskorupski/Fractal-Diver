@@ -52,7 +52,7 @@ Fractal Diver allows users to explore complex mathematical structures in three d
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/jskorupski/fractal-diver.git
+   git clone https://github.com/jskorupski/Fractal-Diver.git
    ```
 2. Install dependencies:
    ```bash

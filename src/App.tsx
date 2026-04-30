@@ -5,6 +5,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
+import { Code, Bug } from 'lucide-react';
 import FractalCanvas from './components/FractalCanvas';
 import DebugPanel from './components/DebugPanel';
 import { InteractionInstructions } from './components/InteractionInstructions';
@@ -64,6 +65,7 @@ export default function App() {
     return !config?.slicer.enabled;
   });
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [debugExpanded, setDebugExpanded] = useState<boolean>(false);
   
   // Interaction and visibility states
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
@@ -279,6 +281,60 @@ export default function App() {
       data-testid="app-container"
     >
       <InteractionInstructions isDragging={isDragging} />
+      
+      <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-30 flex items-center gap-2">
+        <a
+          href="https://github.com/jskorupski/Fractal-Diver"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 h-9 rounded-lg bg-black/40 backdrop-blur-md border border-white/5 hover:border-cyan-500/30 text-white/30 hover:text-cyan-400/80 transition-all duration-300 group text-[10px] font-mono uppercase tracking-wider shadow-lg"
+          title="View source on GitHub"
+        >
+          <Code size={16} className="group-hover:rotate-12 transition-transform duration-300" />
+          <span className="hidden sm:inline">Source Code</span>
+        </a>
+
+        {((import.meta as any).env?.MODE !== 'test') && (
+          <button
+            onClick={() => setDebugExpanded(!debugExpanded)}
+            className={`flex items-center justify-center w-9 h-9 rounded-lg backdrop-blur-md border transition-all duration-300 group shadow-lg ${
+              debugExpanded 
+                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' 
+                : 'bg-black/40 border-white/5 text-white/30 hover:text-cyan-400 hover:border-cyan-500/30'
+            }`}
+            title={debugExpanded ? "Close Debug Panel" : "Open Debug Panel"}
+          >
+            <Bug size={16} className={`${debugExpanded ? 'scale-110' : 'group-hover:scale-110'} transition-transform duration-300`} />
+          </button>
+        )}
+      </div>
+
+      {((import.meta as any).env?.MODE !== 'test') && (
+        <DebugPanel 
+          expanded={debugExpanded}
+          onClose={() => setDebugExpanded(false)}
+          currentInteractiveIterations={finalInteractiveIterations}
+          currentSettledIterations={finalSettledIterations}
+          settleTimeRef={settleTimeRef}
+          fractalType={fractalType}
+          renderCountRef={renderCountRef}
+          fpsRef={fpsRef}
+          performanceKnobs={{
+            interactiveSteps,
+            settledSteps,
+            interactiveEpsilon,
+            settledEpsilon
+          }}
+          onUpdateKnobs={(knobs) => {
+            overrideKnobs(knobs);
+            if (knobs.settledIterations !== undefined || knobs.settledEpsilon !== undefined) {
+              setIsSettledQualityLocked(false);
+            }
+            if (knobs.interactiveSteps !== undefined) setInteractiveSteps(knobs.interactiveSteps);
+            if (knobs.settledSteps !== undefined) setSettledSteps(knobs.settledSteps);
+          }}
+        />
+      )}
 
       <FractalCanvas 
         {...currentView}
@@ -360,31 +416,6 @@ export default function App() {
           setIsDragging={setIsDragging}
           setDraggingParam={setDraggingParam}
         />
-
-        {((import.meta as any).env?.MODE !== 'test') && (
-          <DebugPanel 
-            currentInteractiveIterations={finalInteractiveIterations}
-            currentSettledIterations={finalSettledIterations}
-            settleTimeRef={settleTimeRef}
-            fractalType={fractalType}
-            renderCountRef={renderCountRef}
-            fpsRef={fpsRef}
-            performanceKnobs={{
-              interactiveSteps,
-              settledSteps,
-              interactiveEpsilon,
-              settledEpsilon
-            }}
-            onUpdateKnobs={(knobs) => {
-              overrideKnobs(knobs);
-              if (knobs.settledIterations !== undefined || knobs.settledEpsilon !== undefined) {
-                setIsSettledQualityLocked(false);
-              }
-              if (knobs.interactiveSteps !== undefined) setInteractiveSteps(knobs.interactiveSteps);
-              if (knobs.settledSteps !== undefined) setSettledSteps(knobs.settledSteps);
-            }}
-          />
-        )}
       </div>
     </div>
   );

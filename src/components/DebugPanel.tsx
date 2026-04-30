@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Bug, X } from 'lucide-react';
 
 interface DebugPanelProps {
+  expanded: boolean;
+  onClose: () => void;
   currentInteractiveIterations: number;
   currentSettledIterations: number;
   settleTimeRef: React.MutableRefObject<number>;
@@ -25,6 +27,8 @@ interface DebugPanelProps {
 }
 
 export default function DebugPanel({ 
+  expanded,
+  onClose,
   currentInteractiveIterations, 
   currentSettledIterations, 
   settleTimeRef, 
@@ -34,7 +38,6 @@ export default function DebugPanel({
   performanceKnobs,
   onUpdateKnobs
 }: DebugPanelProps) {
-  const [expanded, setExpanded] = useState(false);
   const [values, setValues] = useState({
     interactive: 0,
     settled: 0,
@@ -90,28 +93,19 @@ export default function DebugPanel({
 
   if ((import.meta as any).env?.MODE === 'test') return null;
 
-  if (!expanded) {
-    return (
-      <button
-        onClick={() => setExpanded(true)}
-        className="fixed top-4 right-4 p-2 bg-black/30 text-white rounded-full backdrop-blur-sm hover:bg-black/50 transition-all z-50"
-      >
-        <Bug size={16} />
-      </button>
-    );
-  }
+  if (!expanded) return null;
 
   // Spinner characters for the frame counter
   const spinnerChars = ['|', '/', '-', '\\'];
   const spinner = spinnerChars[values.renderCount % spinnerChars.length];
 
   return (
-    <div className="fixed top-4 right-4 w-64 bg-black/50 text-white p-4 rounded-lg backdrop-blur-md z-50 shadow-xl border border-white/10">
+    <div className="fixed top-16 right-4 sm:top-20 sm:right-6 w-64 bg-black/80 text-white p-4 rounded-xl backdrop-blur-2xl z-50 shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-cyan-500/20">
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-sm font-bold flex items-center gap-2">
           <Bug size={14} /> Debug
         </h3>
-        <button onClick={() => setExpanded(false)} className="hover:text-gray-300">
+        <button onClick={onClose} className="hover:text-gray-300">
           <X size={16} />
         </button>
       </div>
