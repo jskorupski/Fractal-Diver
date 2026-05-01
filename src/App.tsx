@@ -274,9 +274,13 @@ export default function App() {
   const zoomFactor = Math.log2(Math.max(1, zoom));
 
   // Boost iterations as we zoom in to maintain surface detail at extreme scales.
-  // This is clamped at +24 iterations to prevent runaway performance costs at high zoom.
-  const finalInteractiveIterations = Math.max(interactiveIterations, interactiveIterations + Math.min(24, zoomFactor * 2.0));
-  const finalSettledIterations = Math.max(settledIterations, settledIterations + Math.min(24, zoomFactor * 3.0));
+  // We clamp the interactive iterations boost so we don't completely destroy framerate.
+  const finalInteractiveIterations = Math.max(interactiveIterations, interactiveIterations + Math.min(12, Math.floor(zoomFactor * 0.5)));
+  const finalSettledIterations = Math.max(settledIterations, settledIterations + Math.min(32, Math.floor(zoomFactor * 3.0)));
+  
+  // Loosen the hit-detection threshold (epsilon) when interacting at high zoom levels
+  // to maintain interactive frame rates without completely blowing out the settled quality.
+  const finalInteractiveEpsilon = interactiveEpsilon * (1.0 + Math.max(0, zoomFactor * 1.5));
   
   const handleScreenshot = async () => {
     if (isCapturing) return;
@@ -294,7 +298,7 @@ export default function App() {
         adaptiveSettledIterations: finalSettledIterations,
         settledSteps,
         interactiveSteps,
-        interactiveEpsilon,
+        interactiveEpsilon: finalInteractiveEpsilon,
         settledEpsilon
       });
     } catch (e) {
@@ -384,7 +388,7 @@ export default function App() {
         adaptiveSettledIterations={finalSettledIterations}
         interactiveSteps={interactiveSteps}
         settledSteps={settledSteps}
-        interactiveEpsilon={interactiveEpsilon}
+        interactiveEpsilon={finalInteractiveEpsilon}
         settledEpsilon={settledEpsilon}
         onFrameTime={handleFrameTime}
         settleTimeRef={settleTimeRef}

@@ -284,6 +284,7 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     if (!canvasRef.current) return;
     
     const canvas = canvasRef.current;
+    
     const r = new WebGPURenderer({ canvas, antialias: false });
     r.setPixelRatio(1.0);
     r.setSize(canvas.clientWidth, canvas.clientHeight, false);

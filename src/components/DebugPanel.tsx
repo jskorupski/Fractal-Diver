@@ -86,12 +86,9 @@ export default function DebugPanel({
   };
 
   useEffect(() => {
-    if ((import.meta as any).env?.MODE === 'test') return;
     const interval = setInterval(updateValues, 500);
     return () => clearInterval(interval);
   }, []);
-
-  if ((import.meta as any).env?.MODE === 'test') return null;
 
   if (!expanded) return null;
 

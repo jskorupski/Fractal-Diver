@@ -168,7 +168,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.0005,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 2.0, param2: 0.135, param3: 1.0, baseColor: "#ffa3c2", accentColor: "#ca0758" },
+    parameters: { param1: 2.0, param2: 0.135, param3: 1.0, baseColor: "#ffc7e2", accentColor: "#ff6ba9" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "5": { // Apollonian
