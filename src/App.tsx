@@ -5,7 +5,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
-import { Code, Bug } from 'lucide-react';
+import { Code, Bug, Camera, Loader2 } from 'lucide-react';
 import FractalCanvas from './components/FractalCanvas';
 import DebugPanel from './components/DebugPanel';
 import { InteractionInstructions } from './components/InteractionInstructions';
@@ -15,6 +15,7 @@ import { ParameterToggle, ParameterPanel } from './components/ParameterControls'
 import { FRACTAL_CONFIGS } from './constants/fractals';
 import { usePerformanceAdaptation } from './hooks/usePerformanceAdaptation';
 import { useFractalInteraction } from './hooks/useFractalInteraction';
+import { takeWallpaperScreenshot } from './utils/screenshot';
 
 /**
  * Main Application Component.
@@ -37,6 +38,8 @@ export default function App() {
       param1: number;
       param2: number;
       param3: number;
+      baseColor?: string;
+      accentColor?: string;
     };
     slicer: {
       enabled: boolean;
@@ -66,6 +69,7 @@ export default function App() {
   });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [debugExpanded, setDebugExpanded] = useState<boolean>(false);
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
   
   // Interaction and visibility states
   const [isInteracting, setIsInteracting] = useState<boolean>(false);
@@ -102,7 +106,7 @@ export default function App() {
     zoom: number; 
     offset: THREE.Vector3; 
     rotation: THREE.Quaternion;
-    parameters: Partial<{ qualityOffset: number; param1: number; param2: number; param3: number }>;
+    parameters: Partial<{ qualityOffset: number; param1: number; param2: number; param3: number; baseColor: string; accentColor: string }>;
     slicer: Partial<{ enabled: boolean; offset: number; axis: number }>;
   }>) => {
     // Reset settled quality lock when parameters change
@@ -273,6 +277,32 @@ export default function App() {
   // This is clamped at +24 iterations to prevent runaway performance costs at high zoom.
   const finalInteractiveIterations = Math.max(interactiveIterations, interactiveIterations + Math.min(24, zoomFactor * 2.0));
   const finalSettledIterations = Math.max(settledIterations, settledIterations + Math.min(24, zoomFactor * 3.0));
+  
+  const handleScreenshot = async () => {
+    if (isCapturing) return;
+    setIsCapturing(true);
+    try {
+      await takeWallpaperScreenshot({
+        fractalType,
+        zoom,
+        offset,
+        rotation,
+        parameters,
+        slicerEnabled: slicer.enabled,
+        slicerOffset: slicer.offset,
+        slicerAxis: slicer.axis,
+        adaptiveSettledIterations: finalSettledIterations,
+        settledSteps,
+        interactiveSteps,
+        interactiveEpsilon,
+        settledEpsilon
+      });
+    } catch (e) {
+      console.error("Screenshot failed", e);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
 
   return (
     <div 
@@ -282,6 +312,14 @@ export default function App() {
     >
       <InteractionInstructions isDragging={isDragging} />
       
+      {isCapturing && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md text-cyan-400">
+          <Loader2 size={48} className="animate-spin mb-6" />
+          <h2 className="text-xl sm:text-2xl font-light tracking-widest uppercase mb-2">Rendering Wallpaper</h2>
+          <p className="text-white/60 text-sm tracking-wide">Processing at native device resolution...</p>
+        </div>
+      )}
+
       <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-30 flex items-center gap-2">
         <a
           href="https://github.com/jskorupski/Fractal-Diver"
@@ -365,12 +403,31 @@ export default function App() {
 
       <div 
         data-testid="ui-controls-overlay"
-        className={`absolute bottom-8 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-10 flex flex-col items-end gap-3 max-w-full sm:max-w-[400px] transition-opacity duration-300 ${isDragging && !draggingParam ? 'opacity-20' : 'opacity-100'}`}
+        className={`absolute bottom-8 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-10 flex flex-col items-end gap-3 sm:w-[480px] transition-opacity duration-300 ${isDragging && !draggingParam ? 'opacity-20' : 'opacity-100'}`}
       >
         <div 
           data-testid="main-controls-group"
-          className={`flex items-center justify-between sm:justify-start gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.25)] w-full sm:w-auto overflow-x-auto no-scrollbar transition-opacity duration-300 ${draggingParam ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}
+          className={`flex items-center justify-between sm:justify-start gap-1 p-1 bg-black/60 backdrop-blur-2xl border border-cyan-500/40 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.25)] w-full overflow-x-auto no-scrollbar transition-opacity duration-300 ${draggingParam ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}
         >
+          <button
+            onClick={handleScreenshot}
+            disabled={isCapturing}
+            className={`flex items-center justify-center w-11 h-11 shrink-0 rounded-lg transition-all duration-300 group ${
+              isCapturing
+                ? 'bg-cyan-500/20 text-cyan-400 cursor-wait'
+                : 'text-white/60 hover:text-cyan-400 hover:bg-cyan-500/10'
+            }`}
+            title="Download Ultra-HD Wallpaper"
+          >
+            {isCapturing ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Camera size={18} className="group-hover:scale-110 transition-transform duration-300" />
+            )}
+          </button>
+
+          <div className="w-[1px] h-6 bg-cyan-500/20 shrink-0" />
+
           <FractalSelector 
             fractalType={fractalType}
             onFractalChange={(type) => {

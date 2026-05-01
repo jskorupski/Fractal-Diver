@@ -41,6 +41,8 @@ export interface FractalConfig {
     param1: number;
     param2: number;
     param3: number;
+    baseColor?: string;
+    accentColor?: string;
   };
   slicer: {
     enabled: boolean;
@@ -74,7 +76,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.003,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 8.0, param2: 0, param3: 0 },
+    parameters: { param1: 8.0, param2: 0, param3: 0, baseColor: "#ff994c", accentColor: "#cc331a" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "1": { // Menger Sponge
@@ -97,7 +99,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.002,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 3.3, param2: 0, param3: 0 },
+    parameters: { param1: 3.3, param2: 0, param3: 0, baseColor: "#4ccce5", accentColor: "#1a4cb2" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "2": { // Julia Set
@@ -120,7 +122,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.002,
     panSensitivityMultiplier: 2.08,
     rotSensitivityMultiplier: 2.0,
-    parameters: { param1: 0, param2: -0.8, param3: 0.156 },
+    parameters: { param1: 0, param2: -0.8, param3: 0.156, baseColor: "#994ccc", accentColor: "#331a66" },
     slicer: { enabled: true, offset: 0, axis: 2 }
   },
   "3": { // Sierpinski Tetrahedron
@@ -143,7 +145,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.005,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 1.75, param2: 0, param3: 0 },
+    parameters: { param1: 1.75, param2: 0, param3: 0, baseColor: "#33e57f", accentColor: "#1a664c" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "4": { // Mandelbox
@@ -166,7 +168,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.0005,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 2.0, param2: 0.135, param3: 1.0 },
+    parameters: { param1: 2.0, param2: 0.135, param3: 1.0, baseColor: "#ffa3c2", accentColor: "#ca0758" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "5": { // Apollonian
@@ -189,7 +191,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.008,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 1.0, param2: 0, param3: 0 },
+    parameters: { param1: 1.0, param2: 0, param3: 0, baseColor: "#e5cc66", accentColor: "#7f4c1a" },
     slicer: { enabled: true, offset: 0, axis: 2 }
   }
 };

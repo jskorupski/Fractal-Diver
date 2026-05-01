@@ -345,4 +345,21 @@ describe('App Component', () => {
     
     vi.restoreAllMocks();
   });
+
+  it('handles screenshot capture', async () => {
+    // Mock the screenshot utility
+    const screenshotUtils = await import('./utils/screenshot');
+    vi.spyOn(screenshotUtils, 'takeWallpaperScreenshot').mockResolvedValue(undefined);
+
+    render(<App />);
+
+    const screenshotButton = screen.getByTitle(/Download Ultra-HD Wallpaper/i);
+    expect(screenshotButton).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screenshotButton);
+    });
+
+    expect(screenshotUtils.takeWallpaperScreenshot).toHaveBeenCalled();
+  });
 });

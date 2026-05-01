@@ -17,15 +17,15 @@ interface SlicerToggleProps {
  */
 export const SlicerToggle: React.FC<SlicerToggleProps> = ({ enabled, onToggle }) => {
   return (
-    <div className="flex-1 sm:flex-none flex items-center justify-center gap-2 sm:gap-3 px-3 sm:px-4 border-l border-cyan-500/20 h-11 shrink-0">
+    <div className="flex-none flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3 px-2 sm:px-4 border-l border-cyan-500/20 h-11 shrink-0">
       <div 
         data-testid="slicer-toggle"
         onClick={onToggle}
-        className={`w-8 sm:w-10 h-4 sm:h-5 rounded-full relative cursor-pointer transition-colors duration-300 ${enabled ? 'bg-cyan-500' : 'bg-gray-800'}`}
+        className={`w-7 sm:w-10 h-3.5 sm:h-5 rounded-full relative cursor-pointer transition-colors duration-300 ${enabled ? 'bg-cyan-500' : 'bg-gray-800'}`}
       >
-        <div className={`absolute top-0.5 left-0.5 w-3 sm:w-4 h-3 sm:h-4 rounded-full bg-white transition-transform duration-300 ${enabled ? 'translate-x-4 sm:translate-x-5' : 'translate-x-0'}`} />
+        <div className={`absolute top-0.5 left-0.5 w-2.5 sm:w-4 h-2.5 sm:h-4 rounded-full bg-white transition-transform duration-300 ${enabled ? 'translate-x-3.5 sm:translate-x-5' : 'translate-x-0'}`} />
       </div>
-      <span className={`text-[10px] sm:text-[11px] font-mono uppercase tracking-tight ${enabled ? 'text-cyan-400' : 'text-gray-500'}`}>
+      <span className={`text-[8px] sm:text-[11px] font-mono leading-none uppercase tracking-tight ${enabled ? 'text-cyan-400' : 'text-gray-500'}`}>
         Slicer
       </span>
     </div>
@@ -64,7 +64,7 @@ export const SlicerPanel: React.FC<SlicerPanelProps> = ({
   if (!enabled) return null;
 
   return (
-    <div className={`w-full sm:w-72 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden transition-opacity max-h-[30vh] sm:max-h-[40vh] overflow-y-auto ${isDragging && draggingParam !== 'slicer' ? 'opacity-20' : 'opacity-100'}`}>
+    <div className={`w-full bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-hidden transition-opacity max-h-[30vh] sm:max-h-[40vh] overflow-y-auto ${isDragging && draggingParam !== 'slicer' ? 'opacity-20' : 'opacity-100'}`}>
       <div 
         className="flex items-center justify-between px-5 py-3 border-b border-cyan-500/10 cursor-pointer hover:bg-cyan-500/5 transition-colors"
         onClick={onExpandToggle}

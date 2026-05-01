@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { RotateCcw } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Button } from './ui/button';
 import { FRACTAL_NAMES } from '../constants/fractals';
@@ -30,7 +31,7 @@ export const FractalSelector: React.FC<FractalSelectorProps> = ({
         value={fractalType.toString()} 
         onValueChange={(value) => onFractalChange(parseInt(value, 10))}
       >
-        <SelectTrigger className="flex-1 sm:flex-none w-[140px] sm:w-[160px] bg-transparent text-cyan-400 border-none focus:ring-0 font-mono uppercase tracking-wider text-[10px] sm:text-[11px] h-11 hover:text-cyan-300 transition-colors px-3 sm:px-4">
+        <SelectTrigger className="flex-1 sm:flex-none w-auto sm:w-[160px] bg-transparent text-cyan-400 border-none focus:ring-0 font-mono uppercase tracking-wider text-[10px] sm:text-[11px] h-11 hover:text-cyan-300 transition-colors px-3 sm:px-4">
           <SelectValue>
             {FRACTAL_NAMES[fractalType.toString()]}
           </SelectValue>
@@ -45,13 +46,14 @@ export const FractalSelector: React.FC<FractalSelectorProps> = ({
       </Select>
 
       {/* Reset View Button */}
-      <Button 
+      <button 
         onClick={onResetView} 
-        variant="ghost"
-        className="flex-1 sm:flex-none text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 font-mono uppercase tracking-widest text-[10px] sm:text-[11px] h-11 px-3 sm:px-5 border-l border-cyan-500/20 rounded-none shrink-0"
+        className="w-11 sm:w-auto flex flex-col sm:flex-row items-center justify-center sm:gap-2 flex-none text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 font-mono uppercase tracking-widest text-[10px] sm:text-[11px] h-11 p-0 sm:px-5 border-l border-cyan-500/20 rounded-none shrink-0 cursor-pointer transition-colors"
+        title="Reset View"
       >
-        Reset
-      </Button>
+        <RotateCcw className="w-4 h-4 sm:hidden" />
+        <span className="hidden sm:inline">Reset</span>
+      </button>
     </>
   );
 };

@@ -111,7 +111,9 @@ function FractalMesh({
     uniformSlicerEnabled: uniform(slicerEnabled ? 1.0 : 0.0),
     uniformSlicerOffset: uniform(slicerOffset),
     uniformSlicerAxis: uniform(Math.floor(slicerAxis)),
-    uniformParameters: uniform(new THREE.Vector4(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3))
+    uniformParameters: uniform(new THREE.Vector4(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3)),
+    uniformBaseColor: uniform(new THREE.Color(parameters.baseColor || "#ffffff")),
+    uniformAccentColor: uniform(new THREE.Color(parameters.accentColor || "#ffffff"))
   }), []);
 
   // Force re-render when props change
@@ -183,6 +185,8 @@ function FractalMesh({
     uniforms.uniformSlicerOffset.value = slicerOffset;
     uniforms.uniformSlicerAxis.value = Math.floor(slicerAxis);
     uniforms.uniformParameters.value.set(parameters.qualityOffset, parameters.param1, parameters.param2, parameters.param3);
+    uniforms.uniformBaseColor.value.set(parameters.baseColor || "#ffffff");
+    uniforms.uniformAccentColor.value.set(parameters.accentColor || "#ffffff");
     
     if (isStillSmoothing || isInteracting || !isSettledQualityLocked) {
       invalidate();
@@ -210,7 +214,9 @@ function FractalMesh({
       uniformSlicerEnabled: uniforms.uniformSlicerEnabled,
       uniformSlicerOffset: uniforms.uniformSlicerOffset,
       uniformSlicerAxis: int(uniforms.uniformSlicerAxis),
-      uniformParameters: uniforms.uniformParameters
+      uniformParameters: uniforms.uniformParameters,
+      uniformBaseColor: uniforms.uniformBaseColor,
+      uniformAccentColor: uniforms.uniformAccentColor
     });
     mat.colorNode = colorNode as any;
     return mat;

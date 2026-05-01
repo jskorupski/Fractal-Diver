@@ -27,7 +27,9 @@ export const renderFractal = wgslFn(`
     uniformSlicerEnabled: f32,
     uniformSlicerOffset: f32,
     uniformSlicerAxis: i32,
-    uniformParameters: vec4<f32>
+    uniformParameters: vec4<f32>,
+    uniformBaseColor: vec3<f32>,
+    uniformAccentColor: vec3<f32>
   ) -> vec4<f32> {
     // Aspect ratio correction
     var resolution = uniformResolution;
@@ -133,35 +135,14 @@ export const renderFractal = wgslFn(`
       // Rim Lighting: Adds a subtle glow at the edges of the fractal for better depth perception.
       let rim = pow(1.0 - max(0.0, dot(normal, -rayDirection)), 4.0);
       
-      // Fractal Palettes: Each type gets a distinct primary and accent color.
-      var baseColor = vec3<f32>(0.4, 0.6, 1.0); // Default Blue
-      var accentColor = vec3<f32>(0.2, 0.4, 0.8);
-      
-      if (uniformType == 0) { 
-        baseColor = vec3<f32>(1.0, 0.6, 0.3); // Gold/Orange
-        accentColor = vec3<f32>(0.8, 0.2, 0.1);
-      } else if (uniformType == 1) { 
-        baseColor = vec3<f32>(0.7, 0.7, 0.7); // Silver
-        accentColor = vec3<f32>(0.4, 0.5, 0.6);
-      } else if (uniformType == 2) { 
-        baseColor = vec3<f32>(0.6, 0.3, 0.9); // Purple
-        accentColor = vec3<f32>(0.2, 0.1, 0.4);
-      } else if (uniformType == 3) { 
-        baseColor = vec3<f32>(1.0, 0.4, 0.4); // Red
-        accentColor = vec3<f32>(0.6, 0.1, 0.1);
-      } else if (uniformType == 4) { 
-        baseColor = vec3<f32>(0.3, 0.8, 0.6); // Emerald
-        accentColor = vec3<f32>(0.1, 0.3, 0.2);
-      } else if (uniformType == 5) { 
-        baseColor = vec3<f32>(0.9, 0.8, 0.4); // Sand
-        accentColor = vec3<f32>(0.5, 0.3, 0.1);
-      }
+      var baseColor = uniformBaseColor;
+      var accentColor = uniformAccentColor;
       
       // Orbit Trap Coloring: Uses the auxiliary data from distance estimation (e.g. min radius reached)
       // to mix the accent color into the base color.
       let colorFactor = clamp(hitData.y, 0.0, 1.0);
       let boostedFactor = smoothstep(0.0, 1.0, colorFactor);
-      baseColor = mix(baseColor, accentColor, boostedFactor * 0.8);
+      baseColor = mix(baseColor, accentColor, boostedFactor);
       
       // Position-based color variation: adds extremely subtle texture to plain surfaces.
       let variation = fract(hitPoint / uniformZoom * 0.2 + 0.5);
@@ -214,7 +195,7 @@ export const renderFractal = wgslFn(`
       ) + point;
     }
     
-    return vec2<f32>(0.5 * log(radius) * radius / derivative, clamp(orbitTrap / 16.0, 0.0, 1.0));
+    return vec2<f32>(0.5 * log(radius) * radius / derivative, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
   }
 
   /**
@@ -278,7 +259,7 @@ export const renderFractal = wgslFn(`
       if (length(z) > 4.0) { break; }
     }
     // Distance estimation formula: 0.5 * |z| * log(|z|) / |z'|
-    return vec2<f32>(0.5 * length(z) * log(length(z)) / derivative, clamp(orbitTrap / 16.0, 0.0, 1.0));
+    return vec2<f32>(0.5 * length(z) * log(length(z)) / derivative, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
   }
 
   /**
@@ -297,7 +278,7 @@ export const renderFractal = wgslFn(`
       
       z = z * scale - vec3<f32>(1.0) * (scale - 1.0);
     }
-    return vec2<f32>(length(z) * pow(scale, -f32(iterations)), folds / (3.0 * f32(iterations)));
+    return vec2<f32>(length(z) * pow(scale, -f32(iterations)), clamp(folds / (1.5 * f32(iterations)), 0.0, 1.0));
   }
 
   /**
@@ -337,7 +318,7 @@ export const renderFractal = wgslFn(`
       
       if (dot(z, z) > 1e8) { break; }
     }
-    return vec2<f32>(length(z) / scaleFactor, clamp(orbitTrap, 0.0, 1.0));
+    return vec2<f32>(length(z) / scaleFactor, clamp(sqrt(orbitTrap) * 2.0, 0.0, 1.0));
   }
 
   /**
@@ -359,7 +340,7 @@ export const renderFractal = wgslFn(`
       scaleFactor = scaleFactor * k;
       orbitTrap = min(orbitTrap, r2);
     }
-    return vec2<f32>(0.25 * abs(z.y) / scaleFactor, clamp(orbitTrap, 0.0, 1.0));
+    return vec2<f32>(0.25 * abs(z.y) / scaleFactor, clamp(sqrt(orbitTrap) * 1.5, 0.0, 1.0));
   }
 
   /**

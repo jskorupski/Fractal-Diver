@@ -18,14 +18,13 @@ interface ParameterToggleProps {
  */
 export const ParameterToggle: React.FC<ParameterToggleProps> = ({ enabled, onToggle }) => {
   return (
-    <Button 
+    <button 
       onClick={onToggle} 
-      variant="ghost"
       aria-label="Settings"
-      className={`w-11 h-11 p-0 flex items-center justify-center border-l border-cyan-500/20 rounded-none transition-colors shrink-0 ${enabled ? 'text-cyan-300 bg-cyan-500/20' : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10'}`}
+      className={`w-11 h-11 p-0 flex items-center justify-center border-l border-cyan-500/20 rounded-none transition-colors shrink-0 cursor-pointer ${enabled ? 'text-cyan-300 bg-cyan-500/20' : 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10'}`}
     >
       <Settings2 className="w-4 h-4" />
-    </Button>
+    </button>
   );
 };
 
@@ -35,9 +34,11 @@ interface ParameterPanelProps {
     param1: number;
     param2: number;
     param3: number;
+    baseColor?: string;
+    accentColor?: string;
   };
   enabled: boolean;
-  onUpdate: (updates: { param1?: number; param2?: number; param3?: number }) => void;
+  onUpdate: (updates: { param1?: number; param2?: number; param3?: number; baseColor?: string; accentColor?: string; }) => void;
   isDragging: boolean;
   draggingParam: string | null;
   setIsDragging: (dragging: boolean) => void;
@@ -63,7 +64,7 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({
   return (
     <div 
       data-testid="parameters-panel"
-      className={`w-full sm:w-80 p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity max-h-[40dvh] sm:max-h-[60dvh] overflow-y-auto ${isDragging && !draggingParam ? 'opacity-20' : 'opacity-100'}`}
+      className={`w-full p-4 sm:p-5 bg-black/70 backdrop-blur-3xl border border-cyan-500/40 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.25)] animate-in fade-in slide-in-from-bottom-4 duration-500 transition-opacity max-h-[40dvh] sm:max-h-[60dvh] overflow-y-auto ${isDragging && !draggingParam ? 'opacity-20' : 'opacity-100'}`}
     >
       <div className="flex flex-col gap-4 sm:gap-5">
         <div className="flex items-center gap-2 border-b border-cyan-500/20 pb-3">
@@ -146,6 +147,38 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({
             </div>
           </>
         )}
+
+        <div className="flex flex-row gap-4 sm:gap-6 mt-1">
+          <div className="flex flex-col gap-2 flex-1">
+            <div className="flex justify-between items-center">
+               <span className="text-[9px] font-mono uppercase text-cyan-500/60">Primary Tone</span>
+            </div>
+            <div className="flex items-center gap-3">
+               <input 
+                 type="color"
+                 value={parameters.baseColor || "#6699ff"}
+                 onChange={(e) => onUpdate({ baseColor: e.target.value })}
+                 className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0"
+               />
+               <span className="text-[10px] font-mono text-cyan-400">{parameters.baseColor || "#6699ff"}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 flex-1">
+            <div className="flex justify-between items-center">
+               <span className="text-[9px] font-mono uppercase text-cyan-500/60">Accent Tone</span>
+            </div>
+            <div className="flex items-center gap-3">
+               <input 
+                 type="color"
+                 value={parameters.accentColor || "#3366cc"}
+                 onChange={(e) => onUpdate({ accentColor: e.target.value })}
+                 className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0"
+               />
+               <span className="text-[10px] font-mono text-cyan-400">{parameters.accentColor || "#3366cc"}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
