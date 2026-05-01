@@ -93,9 +93,12 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
 
     lastUpdateRef.current = now;
 
-    // Interactive target: 30fps. Settled target: 10fps.
+    // Interactive target: 30fps. Settled target: 5fps.
     // Settled mode is allowed to be much heavier to produce high-quality final images.
-    const targetFrameTime = isInteracting ? 1 / 30 : 1 / 10; 
+    // By allowing a lower framerate (5fps), lower-end devices can achieve good quality
+    // while high-end devices will naturally hit their quality ceilings (capped in FRACTAL_CONFIGS)
+    // without doing pointless computation.
+    const targetFrameTime = isInteracting ? 1 / 30 : 1 / 5; 
     const error = smoothedDeltaRef.current - targetFrameTime;
     
     // Deadband: Avoid small oscillations if performance is within 15% of target
