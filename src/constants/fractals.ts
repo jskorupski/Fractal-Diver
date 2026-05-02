@@ -76,7 +76,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.003,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 8.0, param2: 0, param3: 0, baseColor: "#ff994c", accentColor: "#cc331a" },
+    parameters: { param1: 8.0, param2: 0, param3: 0, baseColor: "#cba17c", accentColor: "#b37229" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "1": { // Menger Sponge
@@ -99,7 +99,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.002,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 3.3, param2: 0, param3: 0, baseColor: "#4ccce5", accentColor: "#1a4cb2" },
+    parameters: { param1: 3.48, param2: 0, param3: 0, baseColor: "#598e91", accentColor: "#1a7bbc" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "2": { // Julia Set
@@ -122,7 +122,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.002,
     panSensitivityMultiplier: 2.08,
     rotSensitivityMultiplier: 2.0,
-    parameters: { param1: 0, param2: -0.8, param3: 0.156, baseColor: "#994ccc", accentColor: "#331a66" },
+    parameters: { param1: 0, param2: -0.8, param3: 0.156, baseColor: "#c27ae1", accentColor: "#1c0c22" },
     slicer: { enabled: true, offset: 0, axis: 2 }
   },
   "3": { // Sierpinski Tetrahedron
@@ -145,7 +145,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.005,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 1.75, param2: 0, param3: 0, baseColor: "#33e57f", accentColor: "#1a664c" },
+    parameters: { param1: 1.75, param2: 0, param3: 0, baseColor: "#41d2b5", accentColor: "#01231c" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "4": { // Mandelbox
@@ -154,21 +154,21 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     rotation: new THREE.Euler(0.2, 0.4, 0),
     minInteractiveIterations: 16,
     defaultInteractiveIterations: 24,
-    maxInteractiveIterations: 64,
-    minSettledIterations: 32,
-    defaultSettledIterations: 64,
-    maxSettledIterations: 150,
-    interactiveSteps: 120,
-    settledSteps: 800,
+    maxInteractiveIterations: 48,
+    minSettledIterations: 24,
+    defaultSettledIterations: 48,
+    maxSettledIterations: 120,
+    interactiveSteps: 100,
+    settledSteps: 600,
     minInteractiveEpsilon: 0.0001,
     defaultInteractiveEpsilon: 0.0005,
-    maxInteractiveEpsilon: 0.0015,
+    maxInteractiveEpsilon: 0.002,
     minSettledEpsilon: 0.00005,
     defaultSettledEpsilon: 0.0001,
-    maxSettledEpsilon: 0.0005,
+    maxSettledEpsilon: 0.001,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 2.0, param2: 0.135, param3: 1.0, baseColor: "#ffc7e2", accentColor: "#ff6ba9" },
+    parameters: { param1: 2.0, param2: 0.135, param3: 1.0, baseColor: "#e4d1e6", accentColor: "#d987c7" },
     slicer: { enabled: false, offset: 0, axis: 2 }
   },
   "5": { // Apollonian
@@ -191,7 +191,7 @@ export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
     maxSettledEpsilon: 0.008,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
-    parameters: { param1: 1.0, param2: 0, param3: 0, baseColor: "#e5cc66", accentColor: "#7f4c1a" },
+    parameters: { param1: 1.0, param2: 0, param3: 0, baseColor: "#c7b2a3", accentColor: "#f99858" },
     slicer: { enabled: true, offset: 0, axis: 2 }
   }
 };

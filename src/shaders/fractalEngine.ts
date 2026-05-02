@@ -125,12 +125,47 @@ export const renderFractal = wgslFn(`
       let normal = normalize(vec3<f32>(dX, dY, dZ) - dC);
       
       // Lighting components
-      // Ambient Occlusion: Use an exponential decay based on total raymarching step count.
-      // High step counts (deep in crevasses) result in darker colors.
-      let ambientOcclusion = exp(-f32(stepCount) * 0.015);
+      // 1. Distance-based Ambient Occlusion (IQ's method)
+      // Probes the SDF along the normal to determine how occluded the surface is.
+      // Expensive, so we skip it during interaction and limit to 3 steps for performance.
+      var distAO = 1.0;
+      if (uniformInteracting < 0.5) {
+        var occ = 0.0;
+        var sca = 1.0;
+        
+        // Dynamically reduce AO complexity if the raymarch was already very expensive
+        var aoSteps = 3;
+        if (stepCount > 250) { aoSteps = 1; }
+        else if (stepCount > 120) { aoSteps = 2; }
+        
+        for (var i = 0; i < 3; i = i + 1) {
+          if (i >= aoSteps) { break; }
+          let hr = 0.015 + 0.03 * f32(i); // slightly wider spread
+          let aopos = hitPoint + normal * hr;
+          let dd = getFractalData(aopos, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+          occ += -(dd - hr) * sca;
+          sca *= 0.7; // falloff
+        }
+        distAO = clamp(1.0 - 2.5 * occ, 0.0, 1.0);
+      }
       
-      let lightDir = normalize(vec3<f32>(1.0, 1.0, -1.0));
-      let diffuse = max(0.0, dot(normal, lightDir)) * 0.6 + 0.4;
+      // 2. Step-count AO: High step counts (deep in crevasses) result in darker colors.
+      let stepAO = mix(0.15, 1.0, exp(-f32(stepCount) * 0.012));
+      
+      let ambientOcclusion = distAO * stepAO;
+      
+      let mainLightDir = normalize(vec3<f32>(0.8, 1.2, -0.8));
+      let mainDiffuse = max(0.0, dot(normal, mainLightDir));
+      
+      // Secondary fill light illuminates the shadowed areas to show ridge details
+      let fillLightDir = normalize(vec3<f32>(-0.6, -0.2, 0.8));
+      let fillDiffuse = max(0.0, dot(normal, fillLightDir));
+      
+      let diffuse = mainDiffuse * 0.6 + fillDiffuse * 0.25 + 0.15; // Max 1.0 total
+      
+      // Specular Highlight makes ridges catch the light and look sharper - reduced for a more matte look
+      let halfVector = normalize(mainLightDir - rayDirection);
+      let specular = pow(max(0.0, dot(normal, halfVector)), 32.0) * 0.1;
       
       // Rim Lighting: Adds a subtle glow at the edges of the fractal for better depth perception.
       let rim = pow(1.0 - max(0.0, dot(normal, -rayDirection)), 4.0);
@@ -148,11 +183,21 @@ export const renderFractal = wgslFn(`
       let variation = fract(hitPoint / uniformZoom * 0.2 + 0.5);
       baseColor = mix(baseColor, variation, 0.08);
       
-      let finalColor = (baseColor * diffuse + rim * 0.4) * ambientOcclusion;
+      let rawColor = (baseColor * diffuse + vec3<f32>(specular) + vec3<f32>(rim * 0.15)) * ambientOcclusion;
       
-      // Depth fog: Adjusted for better readability at a distance.
-      // Fog reduces contrast for very far objects without making them pure black instantly.
-      let fogFactor = exp(-0.25 * totalDist) + 0.05;
+      // ACES Filmic Tonemapping for cinematic contrast and highlight preservation
+      let a = 2.51;
+      let b = 0.03;
+      let c = 2.43;
+      let d = 0.59;
+      let e = 0.14;
+      let mappedColor = (rawColor * (a * rawColor + b)) / (rawColor * (c * rawColor + d) + e);
+      let finalColor = clamp(mappedColor, vec3<f32>(0.0), vec3<f32>(1.0));
+      
+      // Depth fog: Adjusted to not over-darken the image.
+      // Since totalDist is typically ~5.0 when hitting the fractal surface, 
+      // we offset the distance so foreground objects remain fully visible.
+      let fogFactor = exp(-max(0.0, totalDist - 4.5) * 0.4);
       return vec4<f32>(finalColor * fogFactor, 1.0);
     }
     
@@ -226,7 +271,8 @@ export const renderFractal = wgslFn(`
       // The distance to the sponge is the maximum of the base box and the recursive holes.
       if (c > d) {
         d = c;
-        orbitTrap = f32(i) / f32(iterations);
+        // Enhance trap with positional structural depth
+        orbitTrap = (f32(i) + (da + db + dc) * 0.1) / f32(max(1, iterations));
       }
     }
     return vec2<f32>(d, orbitTrap);

@@ -51,6 +51,8 @@ interface FractalMeshProps {
     param1: number;
     param2: number;
     param3: number;
+    baseColor?: string;
+    accentColor?: string;
   };
 }
 
@@ -243,6 +245,8 @@ interface FractalCanvasProps {
     param1: number;
     param2: number;
     param3: number;
+    baseColor?: string;
+    accentColor?: string;
   };
   isInteracting: boolean;
   interactionType: number;
