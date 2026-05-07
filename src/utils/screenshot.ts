@@ -103,11 +103,11 @@ export const takeWallpaperScreenshot = async (props: any) => {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `fractal-diver-wallpaper-${Date.now()}.png`;
+            a.download = `fractal-diver-wallpaper-${Date.now()}.jpg`;
             a.click();
             URL.revokeObjectURL(url);
             
             resolve();
-        }, 'image/png', 1.0);
+        }, 'image/jpeg', 0.95);
     });
 };
