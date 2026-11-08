@@ -29,21 +29,22 @@ Fractal Diver lets you fly through six classic three-dimensional fractals in rea
 - **Closed-Loop Adaptive Performance**:
   - Uses an asymmetric Exponential Moving Average (EMA) frame-time controller that reacts rapidly to frame drops.
   - Targets **30 FPS** during camera or slider interaction—biasing load-shedding toward raymarching epsilon so 3D fractal geometry stays intact even at deep zoom—and smoothly transitions into high-precision progressive refinement when settled, locking the frame loop once converged to save power.
-- **Deep-Zoom Camera Physics**:
+- **Deep-Zoom Camera Physics & No-Clip Interior Diving**:
+  - **Near-Window No-Clip Diving**: Close-up geometry right in front of the camera lens disappears through a near-clipping window while signed fractal interiors are raymarched as double-sided hollow shells with secant zero-crossing refinement—letting you dive seamlessly through outer walls into interior chambers without camera pushback or GPU stalls.
   - Frame-rate independent quaternion SLERP rotation and damped translation.
   - **Progressive Zoom Deceleration**: Automatically scales down zoom increments and rotation sensitivity logarithmically as magnification increases so you can navigate delicate micro-structures without overshooting.
 - **Real-Time CSG Slicer & Live Parameters**:
   - Slice cleanly through any fractal along the **X**, **Y**, or **Z** axis using Constructive Solid Geometry (CSG) half-space subtraction to inspect internal chambers.
   - Adjust fractal power, scale, folding radii, Julia constants, and primary/accent color tones in real time.
 - **Ultra-HD Wallpaper Export**:
-  - One-click offscreen WebGPU capture with 2× supersampling (up to 4K UHD) and high-quality bicubic downsampling.
+  - One-click offscreen WebGPU capture with 2× supersampling (up to 4K UHD), ACES filmic tone mapping (`SRGBColorSpace`), and high-quality bicubic downsampling.
 
 ## 🎮 Controls
 
 | Action | Desktop (Mouse & Keyboard) | Mobile / Touch |
 | :--- | :--- | :--- |
 | **Orbit / Rotate** | Left-click + drag | 1-finger drag |
-| **Pan Camera** | `Shift` + Left-click + drag | 2-finger drag |
+| **Pan Camera** | Right-click + drag (or `Shift` + Left-click + drag) | 2-finger drag |
 | **Zoom In / Out** | Scroll wheel / trackpad pinch | 2-finger pinch |
 | **Slice Interior** | Toggle **Slicer** in bottom toolbar | Toggle **Slicer** in bottom toolbar |
 | **Tune Parameters** | Click **Settings** (gear icon) | Tap **Settings** (gear icon) |

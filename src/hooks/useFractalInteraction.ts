@@ -25,8 +25,8 @@ interface InteractionProps {
  * Manages mouse, wheel, and multi-touch interactions for navigating the 3D fractal scene:
  * - **Orbit Rotation**: 1-finger drag or primary mouse drag, with logarithmic zoom-depth
  *   sensitivity scaling (`getRotationScale`) so deep-zoom rotation stays responsive without locking up.
- * - **Camera Panning**: 2-finger drag or `Shift` + mouse drag, scaled inversely with zoom so
- *   world-space translation matches screen-space cursor motion.
+ * - **Camera Panning**: 2-finger drag, right-click + drag, or `Shift` + primary mouse drag, scaled
+ *   inversely with zoom so world-space translation matches screen-space cursor motion.
  * - **Progressive Zoom**: Scroll wheel or 2-finger pinch with logarithmic depth deceleration
  *   (`getZoomDamping`) so zooming slows down naturally as you dive into intricate micro-detail,
  *   plus a 1.35x faster zoom-out recovery factor.
@@ -46,6 +46,7 @@ export function useFractalInteraction({
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
   const lastPinchDistRef = useRef<number | null>(null);
   const gestureModeRef = useRef<number>(0); // 0: none, 1: zoom, 2: pan
+  const isRightClickPanRef = useRef<boolean>(false);
   const pinchStartDistRef = useRef<number>(0);
   const panStartMidpointRef = useRef<{ x: number; y: number } | null>(null);
   const lastViewUpdateRef = useRef<number>(0);
@@ -247,10 +248,11 @@ export function useFractalInteraction({
   }, [endInteraction, handleTouchStart]);
 
   /**
-   * Handles mouse down events.
+   * Handles mouse down events (left-click to rotate/Shift-pan, right-click to pan).
    */
   const handleMouseDown = useCallback((e: ReactMouseEvent) => {
-    if (e.button !== undefined && e.button !== 0) return;
+    if (e.button !== undefined && e.button !== 0 && e.button !== 2) return;
+    isRightClickPanRef.current = e.button === 2;
     startInteraction(1);
     lastTouchRef.current = { x: e.clientX, y: e.clientY };
   }, [startInteraction]);
@@ -272,8 +274,9 @@ export function useFractalInteraction({
       setFractalViews((prev: any) => {
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
+        const isPanning = e.shiftKey || isRightClickPanRef.current || (e.buttons !== undefined && (e.buttons & 2) !== 0);
         
-        if (e.shiftKey) {
+        if (isPanning) {
           const baseSensitivity = 0.0012 * defaultConfig.panSensitivityMultiplier;
           const panSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
           return {
@@ -305,6 +308,7 @@ export function useFractalInteraction({
    */
   const handleMouseUp = useCallback(() => {
     endInteraction();
+    isRightClickPanRef.current = false;
     lastTouchRef.current = null;
   }, [endInteraction]);
 

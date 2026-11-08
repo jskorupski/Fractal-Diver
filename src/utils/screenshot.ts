@@ -45,6 +45,10 @@ export const takeWallpaperScreenshot = async (props: any) => {
     renderCanvas.height = renderHeight;
 
     const renderer = new WebGPURenderer({ canvas: renderCanvas, antialias: false, alpha: false });
+    // Match React Three Fiber's default color management and ACES filmic tone mapping
+    // so exported screenshots have identical contrast and color depth to the live viewport.
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.setSize(renderWidth, renderHeight, false);
     await renderer.init();
 

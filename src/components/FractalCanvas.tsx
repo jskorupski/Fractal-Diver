@@ -138,10 +138,10 @@ function FractalMesh({
       smoothedOffset.current.distanceTo(offset) > 0.0005 ||
       smoothedRotation.current.angleTo(targetRotation) > 0.0005;
 
-    // Report frame time for adaptive iterations
-    // Only report if delta is reasonable (e.g. < 0.5s) to avoid huge spikes from tab switching or idle
-    if (onFrameTime && delta < 0.5) {
-      onFrameTime(delta, isStillSmoothing);
+    // Always report frame time (clamping long idle/tab-switch gaps to 1.0s) so heavy frames
+    // (>=500ms) still trigger adaptive load shedding and allow settleTime to reach 1.0 and lock.
+    if (onFrameTime) {
+      onFrameTime(Math.min(delta, 1.0), isStillSmoothing);
     }
 
     // Smoothing factor (higher = faster response)
@@ -223,7 +223,7 @@ function FractalMesh({
     });
     mat.colorNode = colorNode as any;
     return mat;
-  }, [uniforms]);
+  }, [uniforms, renderFractal]);
 
   return (
     <mesh scale={[viewport.width, viewport.height, 1]}>
@@ -273,6 +273,8 @@ interface FractalCanvasProps {
   onMouseLeave: () => void;
 }
 
+const CAMERA_CONFIG = { position: [0, 0, 1] as [number, number, number], fov: 50 };
+
 /**
  * FractalCanvas Component.
  * Manages the lifecycle of the Three.js `WebGPURenderer` and React Three Fiber `createRoot`
@@ -280,6 +282,7 @@ interface FractalCanvasProps {
  * and re-initializes the GPU pipeline on driver reset or sleep/wake recovery.
  */
 export default function FractalCanvas(props: FractalCanvasProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<WebGPURenderer | null>(null);
   const rootRef = useRef<any>(null);
@@ -291,10 +294,13 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     if (!canvasRef.current) return;
     
     const canvas = canvasRef.current;
+    const container = containerRef.current;
+    const initialWidth = container?.clientWidth || canvas.clientWidth || window.innerWidth || 1;
+    const initialHeight = container?.clientHeight || canvas.clientHeight || window.innerHeight || 1;
     
     const r = new WebGPURenderer({ canvas, antialias: false });
     r.setPixelRatio(1.0);
-    r.setSize(canvas.clientWidth, canvas.clientHeight, false);
+    r.setSize(initialWidth, initialHeight, false);
     rendererRef.current = r;
     
     let active = true;
@@ -322,13 +328,16 @@ export default function FractalCanvas(props: FractalCanvasProps) {
         });
       }
       
+      const width = container?.clientWidth || canvas.clientWidth || window.innerWidth || 1;
+      const height = container?.clientHeight || canvas.clientHeight || window.innerHeight || 1;
       const r3fRoot = createRoot(canvas);
       r3fRoot.configure({
         gl: r,
         events,
         frameloop: 'demand',
-        camera: { position: [0, 0, 1], fov: 50 },
-        size: { width: canvas.clientWidth, height: canvas.clientHeight, top: 0, left: 0 }
+        dpr: 1,
+        camera: CAMERA_CONFIG,
+        size: { width, height, top: 0, left: 0 }
       });
       
       rootRef.current = r3fRoot;
@@ -356,26 +365,42 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     };
   }, [retryCount]);
 
-  // Handle resizing
+  // Handle window and container resizing
+  // Note: R3F's internal setSize writes inline `style="width: ...px; height: ...px"` onto <canvas>,
+  // so we must measure `containerRef.current` (the responsive wrapper div) rather than `canvas.clientWidth`.
   useEffect(() => {
     if (root && canvasRef.current) {
       const canvas = canvasRef.current;
+      const container = containerRef.current;
       const handleResize = () => {
-        const width = canvas.clientWidth;
-        const height = canvas.clientHeight;
+        const width = container?.clientWidth || window.innerWidth || canvas.clientWidth || 1;
+        const height = container?.clientHeight || window.innerHeight || canvas.clientHeight || 1;
         
-        // Update renderer size
         if (rendererRef.current) {
-          rendererRef.current.setSize(width, height, false);
+          rendererRef.current.setSize(width, height, true);
         }
 
         root.configure({
+          gl: rendererRef.current,
+          events,
           frameloop: 'demand',
+          dpr: 1,
+          camera: CAMERA_CONFIG,
           size: { width, height, top: 0, left: 0 }
         });
       };
+
       window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+      let resizeObserver: ResizeObserver | null = null;
+      if (typeof ResizeObserver !== 'undefined' && container) {
+        resizeObserver = new ResizeObserver(handleResize);
+        resizeObserver.observe(container);
+      }
+
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        if (resizeObserver) resizeObserver.disconnect();
+      };
     }
   }, [root]);
 
@@ -389,10 +414,11 @@ export default function FractalCanvas(props: FractalCanvasProps) {
   }, [root, props]);
 
   return (
-    <div className="w-full h-full bg-black relative">
+    <div ref={containerRef} className="w-full h-full bg-black relative">
       <canvas 
         ref={canvasRef} 
-        className="w-full h-full"
+        className="w-full h-full block"
+        onContextMenu={(e) => e.preventDefault()}
         onTouchStart={props.onTouchStart}
         onTouchMove={props.onTouchMove}
         onTouchEnd={props.onTouchEnd}

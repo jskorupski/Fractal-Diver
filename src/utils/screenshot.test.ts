@@ -72,8 +72,11 @@ describe('takeWallpaperScreenshot', () => {
         settledEpsilon: 0.0001
     });
 
-    // Check we instantiated a renderer
+    // Check we instantiated a renderer and matched R3F's color space & ACES tone mapping
     expect(WebGPURenderer).toHaveBeenCalled();
+    const rendererInstance = (WebGPURenderer as any).mock.results[0].value;
+    expect(rendererInstance.outputColorSpace).toBe(THREE.SRGBColorSpace);
+    expect(rendererInstance.toneMapping).toBe(THREE.ACESFilmicToneMapping);
   });
 
   it('caps resolution at 3840px on ultra-high-DPI screens', async () => {

@@ -261,10 +261,11 @@ export default function App() {
     // Locking Logic:
     // We lock the quality if:
     // 1. User is not interacting.
-    // 2. The adaptation hook reports it has reached a stable point (updated === false).
+    // 2. The adaptation hook reports it has reached a stable point (updated === false)
+    //    or a fully settled frame has already met/exceeded the 200ms (5fps) settled budget.
     // 3. The visual transition to settled mode is complete (settleTime === 1.0).
     // 4. There is no background movement (momentum/animation).
-    if (!activeInteracting && updated === false && settleTimeRef.current >= 1.0 && !isActuallyMoving) {
+    if (!activeInteracting && (updated === false || delta >= 0.2) && settleTimeRef.current >= 1.0 && !isActuallyMoving) {
       setIsSettledQualityLocked(true);
     }
   }, [activeInteracting, onFrameTime, isSettledQualityLocked, lastActualMoveTimeRef]);
@@ -276,14 +277,21 @@ export default function App() {
   // zoomFactor represents the doubling of magnification relative to the fractal's default zoom.
   // Using zoom / defaultZoom ensures fractals with small initial zoom (e.g. Mandelbox at 0.15)
   // still receive proper LOD iteration boosts as you zoom in.
-  const defaultZoom = FRACTAL_CONFIGS[fractalType.toString()]?.zoom || 1.0;
+  const currentConfig = FRACTAL_CONFIGS[fractalType.toString()];
+  const defaultZoom = currentConfig?.zoom || 1.0;
   const zoomFactor = Math.max(0, Math.log2(Math.max(1, zoom / defaultZoom)));
 
-  // Boost iterations as we zoom in to maintain 3D structural detail at extreme scales.
-  // Keeping interactive iterations close to settled iterations prevents deep-zoom geometry
-  // from collapsing or vanishing while rotating and panning.
-  const finalInteractiveIterations = Math.max(interactiveIterations, interactiveIterations + Math.min(20, Math.floor(zoomFactor * 1.5)));
-  const finalSettledIterations = Math.max(settledIterations, settledIterations + Math.min(36, Math.floor(zoomFactor * 2.5)));
+  // Boost iterations as we zoom in to maintain 3D structural detail at extreme scales,
+  // bounded by each fractal's f32 precision ceiling (especially Mandelbulb's 8^k derivative growth).
+  const maxZoomIterBoost = fractalType === 0 ? 6 : 16;
+  const finalInteractiveIterations = Math.min(
+    (currentConfig?.maxInteractiveIterations || 32) + maxZoomIterBoost,
+    Math.max(interactiveIterations, interactiveIterations + Math.min(maxZoomIterBoost, Math.floor(zoomFactor * 1.2)))
+  );
+  const finalSettledIterations = Math.min(
+    (currentConfig?.maxSettledIterations || 64) + maxZoomIterBoost,
+    Math.max(settledIterations, settledIterations + Math.min(maxZoomIterBoost, Math.floor(zoomFactor * 1.8)))
+  );
   
   // Keep interactiveEpsilon proportional to screen-space pixel size across zoom levels
   // (fractalEngine.ts already scales distance by uniformZoom in world space).

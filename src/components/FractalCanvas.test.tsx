@@ -228,11 +228,26 @@ describe('FractalCanvas Component', () => {
       await Promise.resolve();
     });
 
-    // Trigger window resize
+    // Simulate R3F pinning canvas.clientWidth to old dimensions while the parent wrapper div resizes to 1440x900
+    const canvasEl = document.querySelector('canvas')!;
+    const containerEl = canvasEl.parentElement!;
+    Object.defineProperty(canvasEl, 'clientWidth', { value: 800, configurable: true });
+    Object.defineProperty(canvasEl, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(containerEl, 'clientWidth', { value: 1440, configurable: true });
+    Object.defineProperty(containerEl, 'clientHeight', { value: 900, configurable: true });
+
+    // Trigger window resize and verify R3F configure uses the container dimensions, dpr: 1, and camera config
     await act(async () => {
       window.dispatchEvent(new Event('resize'));
     });
-    expect(mockConfigure).toHaveBeenCalled();
+    expect(mockConfigure).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        frameloop: 'demand',
+        dpr: 1,
+        camera: { position: [0, 0, 1], fov: 50 },
+        size: { width: 1440, height: 900, top: 0, left: 0 }
+      })
+    );
 
     // Render the captured FractalMesh element to exercise its hooks and useFrame loop
     expect(renderedMeshElement).toBeTruthy();
@@ -255,6 +270,17 @@ describe('FractalCanvas Component', () => {
       capturedFrameCallback!({}, 0.016);
     });
     expect(onFrameTime).toHaveBeenCalledWith(0.016, true);
+
+    // Verify slow frames (>=500ms) are still reported (clamped to <=1.0s) rather than dropped
+    act(() => {
+      capturedFrameCallback!({}, 0.75);
+    });
+    expect(onFrameTime).toHaveBeenLastCalledWith(0.75, true);
+
+    act(() => {
+      capturedFrameCallback!({}, 3.5);
+    });
+    expect(onFrameTime).toHaveBeenLastCalledWith(1.0, false);
 
     meshRender.unmount();
     unmount();

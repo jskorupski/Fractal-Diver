@@ -225,21 +225,34 @@ describe('App Component', () => {
     fireEvent.mouseUp(canvas);
   });
 
-  it('handles mouse panning with shift key', () => {
+  it('handles mouse panning with shift key or right-click drag', () => {
+    let currentTime = 500;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
+
     render(<App />);
     const canvas = screen.getByTestId('fractal-canvas');
     
     // Start dragging with shift
     fireEvent.mouseDown(canvas, { clientX: 100, clientY: 100, shiftKey: true });
-    
-    // Move mouse
+    currentTime += 25;
     fireEvent.mouseMove(canvas, { clientX: 110, clientY: 110, shiftKey: true });
     
     // Check if offset prop changed
-    const lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
-    expect(lastCallProps.offset.x).not.toBe(0);
-    
+    let lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    const shiftPanX = lastCallProps.offset.x;
+    expect(shiftPanX).not.toBe(0);
     fireEvent.mouseUp(canvas);
+
+    // Now right-click (button 2) and drag without shift key
+    currentTime += 25;
+    fireEvent.mouseDown(canvas, { clientX: 110, clientY: 110, button: 2 });
+    currentTime += 25;
+    fireEvent.mouseMove(canvas, { clientX: 130, clientY: 120, buttons: 2 });
+    lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(lastCallProps.offset.x).not.toBe(shiftPanX);
+    fireEvent.mouseUp(canvas);
+
+    nowSpy.mockRestore();
   });
 
   it('handles mouse wheel zooming and decelerates zoom increments at deeper zoom levels', () => {
@@ -272,6 +285,15 @@ describe('App Component', () => {
     const ratio1 = zoom2 / zoom1;
     const ratio2 = zoom3 / zoom2;
     expect(ratio2).toBeLessThan(ratio1);
+
+    // Zoom in very deeply on Mandelbulb and verify iterations stay bounded by the f32 precision ceiling
+    for (let i = 0; i < 15; i++) {
+      currentTime += 50;
+      fireEvent.wheel(container, { deltaY: -2000 });
+    }
+    const deepZoomProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(deepZoomProps.adaptiveIterations).toBeLessThanOrEqual(18);
+    expect(deepZoomProps.adaptiveSettledIterations).toBeLessThanOrEqual(20);
 
     nowSpy.mockRestore();
   });
@@ -392,8 +414,8 @@ describe('App Component', () => {
     render(<App />);
     const canvas = screen.getByTestId('fractal-canvas');
 
-    // Right-click (button 2) should be ignored and not start interaction
-    fireEvent.mouseDown(canvas, { clientX: 50, clientY: 50, button: 2 });
+    // Middle-click (button 1) should be ignored and not start interaction
+    fireEvent.mouseDown(canvas, { clientX: 50, clientY: 50, button: 1 });
     let latestProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
     expect(latestProps.isInteracting).toBe(false);
 

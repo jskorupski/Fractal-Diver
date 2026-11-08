@@ -22,7 +22,7 @@ export const InteractionInstructions: React.FC<InteractionInstructionsProps> = (
       <div className="h-[1px] w-12 bg-cyan-500/50" />
       <div className="flex flex-col gap-0.5">
         <div className="text-cyan-500/40 text-[8px] sm:text-[9px] uppercase font-mono tracking-[0.2em]">
-          Drag to Rotate • 2-Finger Drag or Shift+Drag to Pan
+          Drag to Rotate • Right-Drag, 2-Finger Drag or Shift+Drag to Pan
         </div>
         <div className="text-cyan-500/40 text-[8px] sm:text-[9px] uppercase font-mono tracking-[0.2em]">
           Scroll or Pinch to Zoom

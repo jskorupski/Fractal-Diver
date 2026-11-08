@@ -10,20 +10,27 @@ import { wgslFn } from 'three/tsl';
  *
  * Architecture Overview:
  * 1. Primary Raymarching (`renderFractal`):
- *    - Casts camera-relative rays through a screen-space quad.
+ *    - Casts camera-relative rays through a screen-space quad with a near-clipping window (`totalDist < 0.55`)
+ *      so close-up geometry right in front of the lens disappears cleanly when diving into a fractal.
+ *    - Treats signed fractal interiors as hollow shells (`abs(signedDist)`) when no-clip diving
+ *      (`uniformSlicerEnabled < 0.5`), combined with secant zero-crossing refinement so rays can traverse
+ *      interior cavities in ~10-40 steps without GPU hangs or surface overshoot.
  *    - Bounds the surface hit threshold (`effectiveEpsilon * totalDist`) by the angular footprint
  *      of a screen pixel (`pixelScale`) to prevent marching into sub-pixel fractal needles.
  *    - Smoothly interpolates step budgets, epsilon thresholds, and fractal iterations between
  *      interactive (30 FPS target) and settled (5 FPS progressive refinement) states via `uniformSettleTime`.
  * 2. Surface Normals & Lighting:
  *    - Evaluates surface gradients in fractal space using Inigo Quilez's 4-tap tetrahedral
- *      central-difference stencil filtered across the pixel footprint.
+ *      central-difference stencil filtered across the pixel footprint, with double-sided normal
+ *      orientation (`orientedNormal`) so interior walls are accurately lit when diving inside.
  *    - Combines fractal-space multi-sample Ambient Occlusion (`distAO`) with crevasse step-count
  *      occlusion (`stepAO`), a camera-attached key/fill lighting rig, Blinn-Phong specular highlights,
  *      Fresnel rim lighting, orbit-trap palette blending, and ACES filmic tonemapping.
  * 3. Distance Estimators (`get*Data`):
  *    - Analytic and IFS distance estimators for Mandelbulb, Menger Sponge, 3D Julia Set,
- *      Sierpinski Tetrahedron, Mandelbox, and Apollonian Gasket, plus optional CSG half-space slicing.
+ *      Sierpinski Tetrahedron, Mandelbox, and Apollonian Gasket, with exterior bounding-sphere
+ *      clamping (preventing zoomed-out Hubbard-Douady $O(r \ln r)$ overshoot), single-precision `f32`
+ *      derivative overflow guards (`derivative > 1e15`), and optional CSG half-space slicing.
  */
 export const renderFractal = wgslFn(`
   fn renderFractal(
@@ -58,18 +65,21 @@ export const renderFractal = wgslFn(`
     let zoomLOD = log2(max(1.0, uniformZoom));
     let lodFactor = clamp(zoomLOD / 10.0, 0.0, 1.0);
     
-    // Ray setup
+    // Ray setup (no-clip camera with near-clipping window so close-up geometry disappears when diving inside)
     let rayOrigin = uniformRotation * vec3<f32>(0.0, 0.0, -5.0) + uniformOffset;
     let rayDirection = uniformRotation * normalize(vec3<f32>(uvCoords, 1.5));
     
-    var totalDist = 0.1;
+    var totalDist = 0.40;
+    var prevDist = 0.40;
+    var prevSigned = 0.0;
+    var hasPrev = false;
     var stepCount = 0;
     var isHit = false;
     var hitOrbitTrap = 0.0;
     
     // Dynamic raymarching steps
-    // Scale between interactiveSteps and settledSteps based on settleTime, with an extra LOD boost at deep zoom.
-    let settledTargetSteps = min(1024.0, uniformSettledSteps * (1.0 + lodFactor * 0.25));
+    // Scale between interactiveSteps and settledSteps based on settleTime.
+    let settledTargetSteps = min(800.0, uniformSettledSteps);
     let baseSteps = mix(uniformInteractiveSteps, settledTargetSteps, uniformSettleTime);
     let maxSteps = i32(baseSteps);
     
@@ -90,7 +100,7 @@ export const renderFractal = wgslFn(`
       // Transform to global fractal space
       let globalPoint = (currentPoint - uniformOffset) / uniformZoom + uniformOffset;
       
-      // Sample distance
+      // Sample signed distance
       let data = getFractalData(
         globalPoint, 
         uniformType, 
@@ -105,19 +115,40 @@ export const renderFractal = wgslFn(`
         uniformAdaptiveSettledIterations,
         uniformInteracting
       );
-      let dist = data.x * uniformZoom;
+      let signedDist = data.x * uniformZoom;
+      // When no-clip diving (slicer disabled), march using abs(signedDist) so solid interiors act as hollow shells
+      let dist = select(abs(signedDist), signedDist, uniformSlicerEnabled > 0.5);
       
-      if (dist < threshold) {
+      // Detect exact zero-isosurface crossing between steps via secant interpolation
+      if (totalDist >= 0.55 && hasPrev && prevSigned * signedDist < 0.0 && abs(prevSigned) < 0.2 * uniformZoom) {
+        let tFrac = abs(prevSigned) / (abs(prevSigned) + abs(signedDist) + 1e-10);
+        totalDist = prevDist + (totalDist - prevDist) * tFrac;
         isHit = true;
         hitOrbitTrap = data.y;
         break;
       }
       
+      if (dist < threshold) {
+        // Near-clipping window: make geometry right in front of the lens disappear so the camera can dive inside
+        if (totalDist < 0.55 && uniformSlicerEnabled < 0.5) {
+          totalDist = totalDist + max(0.05, dist);
+          hasPrev = false;
+          stepCount = i + 1;
+          continue;
+        }
+        isHit = true;
+        hitOrbitTrap = data.y;
+        break;
+      }
+      
+      prevDist = totalDist;
+      prevSigned = signedDist;
+      hasPrev = true;
       totalDist = totalDist + max(threshold * 0.25, dist);
       stepCount = i + 1;
       
-      // Escape distance
-      if (totalDist > mix(50.0, 100.0, uniformSettleTime)) { break; }
+      // Escape when ray exceeds zoom-scaled max view distance
+      if (totalDist > mix(50.0, 100.0, uniformSettleTime) * max(1.0, uniformZoom)) { break; }
     }
     
     // --- Shading ---
@@ -143,7 +174,10 @@ export const renderFractal = wgslFn(`
       let d4 = getFractalData(pG + k4 * normalEpsilon, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
       
       let rawNormal = k1 * d1 + k2 * d2 + k3 * d3 + k4 * d4;
-      let normal = select(vec3<f32>(0.0, 0.0, -1.0), normalize(rawNormal), dot(rawNormal, rawNormal) > 1e-20);
+      let unitNormal = normalize(rawNormal);
+      // Orient normal toward the incoming camera ray so interior surfaces are properly lit when diving inside
+      let orientedNormal = select(unitNormal, -unitNormal, dot(unitNormal, rayDirection) > 0.0);
+      let normal = select(vec3<f32>(0.0, 0.0, -1.0), orientedNormal, dot(rawNormal, rawNormal) > 1e-20);
       
       // Lighting components
       // 1. Distance-based Ambient Occlusion (IQ's method) evaluated in fractal space and scaled by zoom & distance.
@@ -163,7 +197,7 @@ export const renderFractal = wgslFn(`
           let hrWorld = (0.015 + 0.03 * f32(i)) * distanceScale;
           let hrFractal = hrWorld / uniformZoom;
           let aopos = pG + normal * hrFractal;
-          let ddFractal = getFractalData(aopos, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+          let ddFractal = abs(getFractalData(aopos, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x);
           let ddWorld = ddFractal * uniformZoom;
           occ += max(0.0, hrWorld - ddWorld) * sca;
           sca *= 0.7; // falloff
@@ -218,10 +252,9 @@ export const renderFractal = wgslFn(`
       let mappedColor = (rawColor * (a * rawColor + b)) / (rawColor * (c * rawColor + d) + e);
       let finalColor = clamp(mappedColor, vec3<f32>(0.0), vec3<f32>(1.0));
       
-      // Depth fog: Adjusted to not over-darken the image.
-      // Since totalDist is typically ~5.0 when hitting the fractal surface, 
-      // we offset the distance so foreground objects remain fully visible.
-      let fogFactor = exp(-max(0.0, totalDist - 4.5) * 0.4);
+      // Depth fog normalized by zoom so deep-zoom canyon walls do not fade to black
+      let fogDist = totalDist / max(1.0, pow(uniformZoom, 0.8));
+      let fogFactor = exp(-max(0.0, fogDist - 5.5) * 0.25);
       return vec4<f32>(finalColor * fogFactor, 1.0);
     }
     
@@ -245,7 +278,7 @@ export const renderFractal = wgslFn(`
     var orbitTrap = dot(z, z);
     
     for (var i = 0; i < 128; i = i + 1) {
-      if (i >= iterations || radius > 4.0) { break; }
+      if (i >= iterations || radius > 4.0 || derivative > 1e15) { break; }
       
       // Convert to spherical coordinates (clamped to prevent acos NaN at origin or f32 drift)
       let safeRadius = max(1e-10, radius);
@@ -267,9 +300,13 @@ export const renderFractal = wgslFn(`
       orbitTrap = min(orbitTrap, dot(z, z));
     }
     
-    let safeR = max(1.0001, radius);
-    let dist = 0.5 * log(safeR) * safeR / max(1e-10, derivative);
-    return vec2<f32>(dist * 0.8, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
+    let safeR = select(radius, max(0.25, radius), radius < 1.0);
+    let factor = select(0.8, 0.3, radius < 1.0);
+    let rawDist = 0.5 * log(safeR) * safeR / max(1e-10, derivative) * factor;
+    let pLen = length(point);
+    // Bound exterior step by outer bounding sphere so zoomed-out rays (pLen > 4.0) never overshoot the front surface
+    let boundedDist = select(rawDist, min(rawDist, pLen - 1.2), pLen > 1.35);
+    return vec2<f32>(boundedDist, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
   }
 
   /**
@@ -321,7 +358,7 @@ export const renderFractal = wgslFn(`
     var radius = length(z);
     
     for (var i = 0; i < 128; i = i + 1) {
-      if (i >= iterations || radius > 4.0) { break; }
+      if (i >= iterations || radius > 4.0 || derivative > 1e15) { break; }
       
       // Calculate the derivative for distance estimation: d(z^2 + c)/dz = 2z
       derivative = max(1e-20, 2.0 * radius * derivative);
@@ -338,8 +375,12 @@ export const renderFractal = wgslFn(`
       radius = length(z);
     }
     // Distance estimation formula: 0.5 * |z| * log(|z|) / |z'|
-    let safeR = max(1.0001, radius);
-    return vec2<f32>(0.5 * safeR * log(safeR) / max(1e-10, derivative), clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
+    let safeR = select(radius, max(0.25, radius), radius < 1.0);
+    let factor = select(0.5, 0.2, radius < 1.0);
+    let rawDist = factor * safeR * log(safeR) / max(1e-10, derivative);
+    let pLen = length(point);
+    let boundedDist = select(rawDist, min(rawDist, pLen - 1.8), pLen > 2.0);
+    return vec2<f32>(boundedDist, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
   }
 
   /**
