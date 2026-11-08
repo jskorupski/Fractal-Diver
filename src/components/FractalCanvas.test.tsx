@@ -169,4 +169,96 @@ describe('FractalCanvas Component', () => {
     
     vi.useRealTimers();
   });
+
+  it('handles WebGPU initialization failure and retries, plus window resize and FractalMesh frame loop', async () => {
+    vi.useFakeTimers();
+    const { WebGPURenderer } = await import('three/webgpu');
+    const { createRoot, useFrame } = await import('@react-three/fiber');
+
+    let capturedFrameCallback: ((state: any, delta: number) => void) | null = null;
+    (useFrame as any).mockImplementation((cb: any) => {
+      capturedFrameCallback = cb;
+    });
+
+    let renderedMeshElement: any = null;
+    const mockConfigure = vi.fn();
+    (createRoot as any).mockImplementation(() => ({
+      configure: mockConfigure,
+      render: vi.fn((el) => {
+        renderedMeshElement = el;
+      }),
+      unmount: vi.fn()
+    }));
+
+    // First attempt fails init(), second attempt succeeds with a non-resolving device.lost promise
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    (WebGPURenderer as any)
+      .mockImplementationOnce(function() {
+        return {
+          init: () => Promise.reject(new Error('No WebGPU adapter')),
+          setPixelRatio: vi.fn(),
+          setSize: vi.fn(),
+          dispose: vi.fn()
+        };
+      })
+      .mockImplementation(function() {
+        return {
+          init: () => Promise.resolve(),
+          setPixelRatio: vi.fn(),
+          setSize: vi.fn(),
+          dispose: vi.fn(),
+          backend: { device: { lost: new Promise(() => {}) } }
+        };
+      });
+
+    const onFrameTime = vi.fn();
+    const { rerender, unmount } = render(
+      <FractalCanvas {...defaultProps} onFrameTime={onFrameTime} />
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/WEBGPU INITIALIZATION FAILED/i)).toBeInTheDocument();
+
+    // Advance 3000ms to trigger retry, which uses the default succeeding WebGPURenderer mock
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+      await Promise.resolve();
+    });
+
+    // Trigger window resize
+    await act(async () => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(mockConfigure).toHaveBeenCalled();
+
+    // Render the captured FractalMesh element to exercise its hooks and useFrame loop
+    expect(renderedMeshElement).toBeTruthy();
+    const meshRender = render(renderedMeshElement);
+    expect(capturedFrameCallback).toBeTypeOf('function');
+
+    // Update FractalMesh with new camera target so smoothing branches (lerp/slerp) execute
+    const movedProps = {
+      ...defaultProps,
+      zoom: 2.5,
+      offset: new THREE.Vector3(1, -1, 0.5),
+      rotation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, 0.4, 0.1)),
+      slicerEnabled: true,
+      isInteracting: true,
+      onFrameTime
+    };
+    meshRender.rerender({ ...renderedMeshElement, props: movedProps });
+
+    act(() => {
+      capturedFrameCallback!({}, 0.016);
+    });
+    expect(onFrameTime).toHaveBeenCalledWith(0.016, true);
+
+    meshRender.unmount();
+    unmount();
+    consoleErrorSpy.mockRestore();
+    vi.useRealTimers();
+  });
 });

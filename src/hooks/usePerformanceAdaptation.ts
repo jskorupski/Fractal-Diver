@@ -1,6 +1,14 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { FRACTAL_CONFIGS, type FractalConfig } from '../constants/fractals';
 
+/**
+ * Adaptive quality parameters tracked per fractal type.
+ */
 interface AdaptationState {
   interactiveEpsilon: number;
   settledEpsilon: number;
@@ -9,9 +17,19 @@ interface AdaptationState {
 }
 
 /**
- * Hook to manage performance adaptation logic.
- * It tracks frame times and adjusts fractal quality parameters (epsilon and iterations)
- * to maintain a target frame rate, while ensuring quality never drops below interactive levels.
+ * Closed-loop adaptive performance controller for real-time WebGPU raymarching.
+ *
+ * Control Architecture:
+ * - **Asymmetric Exponential Moving Average (EMA)**: Smooths frame times while reacting ~3x faster
+ *   to frame-time degradation than to improvements, with an instant fast-path (`alpha = 0.9`) for
+ *   severe lag spikes (>100ms and >1.5x average).
+ * - **Dual-Regime Targets**:
+ *   - Interactive mode (`isInteracting = true`) targets 30 FPS (`33.3ms`) and biases load-shedding
+ *     toward `epsilon` (`multiplier^0.65`) over `iterations` (`multiplier^0.35`) so 3D fractal
+ *     structure remains intact while orbiting or panning at deep zoom.
+ *   - Settled mode (`isInteracting = false`) immediately inherits the current interactive baseline
+ *     on release and progressively refines quality down to a 5 FPS (`200ms`) budget until bounded
+ *     by per-fractal precision ceilings or locked by `App.tsx`.
  */
 export function usePerformanceAdaptation(fractalType: number, isInteracting: boolean) {
   // Store state for all fractals in a ref so switching fractals doesn't lose the learned performance state
@@ -42,6 +60,22 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
   const sampleCountRef = useRef<number>(0);
   const lastInteractionStateRef = useRef<boolean>(isInteracting);
 
+  // Immediately inherit interactive quality baseline when transitioning from interacting to settled
+  // so the first settled frame doesn't render with stale high-cost settled parameters.
+  useEffect(() => {
+    const state = stateRef.current[fractalType];
+    if (isInteracting !== lastInteractionStateRef.current) {
+      if (!isInteracting && state) {
+        state.settledEpsilon = state.interactiveEpsilon;
+        state.settledIterations = state.interactiveIterations;
+        setCurrentValues({ ...state });
+      }
+      lastInteractionStateRef.current = isInteracting;
+      sampleCountRef.current = 0;
+      smoothedDeltaRef.current = 1 / 30;
+    }
+  }, [fractalType, isInteracting]);
+
   /**
    * Called every frame with the time taken for the previous frame.
    * Updates the adaptive parameters if necessary.
@@ -61,7 +95,8 @@ export function usePerformanceAdaptation(fractalType: number, isInteracting: boo
       }
       lastInteractionStateRef.current = isInteracting;
       sampleCountRef.current = 0;
-      smoothedDeltaRef.current = delta;
+      // Clamp initial delta on transition to prevent a single transition frame from poisoning the settled deadband
+      smoothedDeltaRef.current = !isInteracting ? Math.min(delta, 1 / 30) : delta;
     }
 
     // Exponential Moving Average (EMA) for frame delta to smooth out jitter
@@ -194,24 +229,28 @@ function applyPerformanceAdjustment(
   let updated = false;
 
   if (isInteracting) {
+    // Bias interactive adjustments toward epsilon (raymarching step count) rather than iterations
+    // so that 3D fractal geometry/structure is preserved when rotating and moving at deep zoom.
+    const epsilonFactor = Math.pow(multiplier, 0.65);
+    const iterFactor = Math.pow(multiplier, 0.35);
     if (multiplier > 1) {
       // Lagging: Decrease quality (increase epsilon, decrease iterations)
       if (state.interactiveEpsilon < config.maxInteractiveEpsilon) {
-        state.interactiveEpsilon = Math.min(config.maxInteractiveEpsilon, state.interactiveEpsilon * splitMultiplier);
+        state.interactiveEpsilon = Math.min(config.maxInteractiveEpsilon, state.interactiveEpsilon * epsilonFactor);
         updated = true;
       }
       if (state.interactiveIterations > config.minInteractiveIterations) {
-        state.interactiveIterations = Math.max(config.minInteractiveIterations, Math.floor(state.interactiveIterations / splitMultiplier));
+        state.interactiveIterations = Math.max(config.minInteractiveIterations, Math.floor(state.interactiveIterations / iterFactor));
         updated = true;
       }
     } else {
       // Fast: Increase quality (decrease epsilon, increase iterations)
       if (state.interactiveEpsilon > config.minInteractiveEpsilon) {
-        state.interactiveEpsilon = Math.max(config.minInteractiveEpsilon, state.interactiveEpsilon * splitMultiplier);
+        state.interactiveEpsilon = Math.max(config.minInteractiveEpsilon, state.interactiveEpsilon * epsilonFactor);
         updated = true;
       }
       if (state.interactiveIterations < config.maxInteractiveIterations) {
-        state.interactiveIterations = Math.min(config.maxInteractiveIterations, Math.ceil(state.interactiveIterations / splitMultiplier));
+        state.interactiveIterations = Math.min(config.maxInteractiveIterations, Math.ceil(state.interactiveIterations / iterFactor));
         updated = true;
       }
     }

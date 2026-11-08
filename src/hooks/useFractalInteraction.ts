@@ -22,8 +22,14 @@ interface InteractionProps {
 
 /**
  * useFractalInteraction Hook.
- * Manages mouse and touch interactions for navigating the fractal scene.
- * Handles rotation, panning, and zooming with sensitivity scaling.
+ * Manages mouse, wheel, and multi-touch interactions for navigating the 3D fractal scene:
+ * - **Orbit Rotation**: 1-finger drag or primary mouse drag, with logarithmic zoom-depth
+ *   sensitivity scaling (`getRotationScale`) so deep-zoom rotation stays responsive without locking up.
+ * - **Camera Panning**: 2-finger drag or `Shift` + mouse drag, scaled inversely with zoom so
+ *   world-space translation matches screen-space cursor motion.
+ * - **Progressive Zoom**: Scroll wheel or 2-finger pinch with logarithmic depth deceleration
+ *   (`getZoomDamping`) so zooming slows down naturally as you dive into intricate micro-detail,
+ *   plus a 1.35x faster zoom-out recovery factor.
  */
 export function useFractalInteraction({
   fractalType,
@@ -54,14 +60,28 @@ export function useFractalInteraction({
     setInteractionType(type);
     settleTimeRef.current = 0;
     
-    const config = FRACTAL_CONFIGS[fractalType.toString()];
-    setInteractiveSteps(config.interactiveSteps);
-    setSettledSteps(config.settledSteps);
-    
     gestureModeRef.current = 0;
     setIsSettledQualityLocked(false);
     lastViewUpdateRef.current = 0;
-  }, [fractalType, setIsInteracting, setInteractionType, settleTimeRef, setInteractiveSteps, setSettledSteps, setIsSettledQualityLocked]);
+  }, [setIsInteracting, setInteractionType, settleTimeRef, setIsSettledQualityLocked]);
+
+  /**
+   * Logarithmic rotation scaling so deep-zoom rotation stays precise without locking up.
+   */
+  const getRotationScale = useCallback((currentZoom: number, defaultZoom: number) => {
+    const zoomRatio = currentZoom / defaultZoom;
+    return zoomRatio <= 1.0
+      ? 1.0 / Math.max(0.25, zoomRatio)
+      : 1.0 / (1.0 + 0.35 * Math.log2(zoomRatio));
+  }, []);
+
+  /**
+   * Progressive zoom deceleration so zooming slows down as you dive deeper into fractal detail.
+   */
+  const getZoomDamping = useCallback((currentZoom: number, defaultZoom: number) => {
+    const zoomDepth = Math.max(0, Math.log2(Math.max(1, currentZoom / defaultZoom)));
+    return 1.0 / (1.0 + 0.35 * zoomDepth);
+  }, []);
 
   /**
    * Finalizes interaction state.
@@ -136,7 +156,7 @@ export function useFractalInteraction({
         const current = prev[fractalType];
         const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
         const baseSensitivity = 0.012 * defaultConfig.rotSensitivityMultiplier;
-        const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
+        const rotSensitivity = baseSensitivity * getRotationScale(current.zoom, defaultConfig.zoom);
         
         return {
           ...prev,
@@ -186,7 +206,10 @@ export function useFractalInteraction({
         let nextOffset = current.offset.clone();
 
         if (gestureModeRef.current === 1) {
-          nextZoom = current.zoom * deltaZoom;
+          const damping = getZoomDamping(current.zoom, defaultConfig.zoom);
+          const rawLogZoom = Math.log(Math.max(0.01, deltaZoom));
+          const dampedLogZoom = rawLogZoom > 0 ? rawLogZoom * damping : rawLogZoom * Math.min(1.0, damping * 1.35);
+          nextZoom = current.zoom * Math.exp(dampedLogZoom);
         } else if (gestureModeRef.current === 2) {
           const basePanSensitivity = 0.0012 * defaultConfig.panSensitivityMultiplier;
           const panSensitivity = basePanSensitivity * (defaultConfig.zoom / current.zoom);
@@ -197,16 +220,18 @@ export function useFractalInteraction({
           ...prev,
           [fractalType]: {
             ...current,
-            zoom: Math.max(0.0001, Math.min(100.0, nextZoom)),
+            zoom: Math.max(0.0001, Math.min(1000.0, nextZoom)),
             offset: nextOffset
           }
         };
       });
 
-      lastPinchDistRef.current = dist;
-      lastTouchRef.current = { x: avgX, y: avgY };
+      if (gestureModeRef.current !== 0) {
+        lastPinchDistRef.current = dist;
+        lastTouchRef.current = { x: avgX, y: avgY };
+      }
     }
-  }, [fractalType, setFractalViews, calculateRotation, calculatePanning]);
+  }, [fractalType, setFractalViews, calculateRotation, calculatePanning, getRotationScale, getZoomDamping]);
 
   /**
    * Handles touch end events.
@@ -225,6 +250,7 @@ export function useFractalInteraction({
    * Handles mouse down events.
    */
   const handleMouseDown = useCallback((e: ReactMouseEvent) => {
+    if (e.button !== undefined && e.button !== 0) return;
     startInteraction(1);
     lastTouchRef.current = { x: e.clientX, y: e.clientY };
   }, [startInteraction]);
@@ -259,7 +285,7 @@ export function useFractalInteraction({
           };
         } else {
           const baseSensitivity = 0.003 * defaultConfig.rotSensitivityMultiplier;
-          const rotSensitivity = baseSensitivity * (defaultConfig.zoom / current.zoom);
+          const rotSensitivity = baseSensitivity * getRotationScale(current.zoom, defaultConfig.zoom);
           return {
             ...prev,
             [fractalType]: {
@@ -272,7 +298,7 @@ export function useFractalInteraction({
 
       lastTouchRef.current = { x: e.clientX, y: e.clientY };
     }
-  }, [isInteracting, fractalType, setFractalViews, calculateRotation, calculatePanning]);
+  }, [isInteracting, fractalType, setFractalViews, calculateRotation, calculatePanning, getRotationScale]);
 
   /**
    * Handles mouse up events.
@@ -305,19 +331,22 @@ export function useFractalInteraction({
       wheelTimeoutRef.current = null;
     }, 200);
 
-    const delta = -e.deltaY * 0.001;
+    const rawDelta = -e.deltaY * 0.001;
     setFractalViews((prev: any) => {
       const current = prev[fractalType];
-      const nextZoom = current.zoom * Math.exp(delta);
+      const defaultConfig = FRACTAL_CONFIGS[fractalType.toString()];
+      const damping = getZoomDamping(current.zoom, defaultConfig.zoom);
+      const dampedDelta = rawDelta > 0 ? rawDelta * damping : rawDelta * Math.min(1.0, damping * 1.35);
+      const nextZoom = current.zoom * Math.exp(dampedDelta);
       return {
         ...prev,
         [fractalType]: {
           ...current,
-          zoom: Math.max(0.0001, Math.min(100.0, nextZoom))
+          zoom: Math.max(0.0001, Math.min(1000.0, nextZoom))
         }
       };
     });
-  }, [fractalType, startInteraction, endInteraction, setFractalViews]);
+  }, [fractalType, startInteraction, endInteraction, setFractalViews, getZoomDamping]);
 
   return {
     handleTouchStart,

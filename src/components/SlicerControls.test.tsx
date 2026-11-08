@@ -133,5 +133,31 @@ describe('SlicerControls', () => {
       fireEvent.touchEnd(slider);
       expect(setIsDragging).toHaveBeenCalledWith(false);
     });
+
+    it('toggles expansion when header is clicked and hides controls when collapsed', () => {
+      const onUpdate = vi.fn();
+      const onExpandToggle = vi.fn();
+      const setIsDragging = vi.fn();
+      const setDraggingParam = vi.fn();
+
+      render(
+        <SlicerPanel
+          enabled={true}
+          offset={0}
+          axis={1}
+          expanded={false}
+          onExpandToggle={onExpandToggle}
+          onUpdate={onUpdate}
+          isDragging={true}
+          draggingParam="param1"
+          setIsDragging={setIsDragging}
+          setDraggingParam={setDraggingParam}
+        />
+      );
+
+      expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('Slicer Controls'));
+      expect(onExpandToggle).toHaveBeenCalledTimes(1);
+    });
   });
 });

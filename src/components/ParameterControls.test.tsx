@@ -96,6 +96,28 @@ describe('ParameterControls', () => {
       expect(onUpdate).toHaveBeenCalledWith({ param3: 1.5 });
     });
 
+    it('renders Scale label for Apollonian fractal (type 5)', () => {
+      const onUpdate = vi.fn();
+      const setIsDragging = vi.fn();
+      const setDraggingParam = vi.fn();
+      const params = { param1: 1.0, param2: 0, param3: 0, baseColor: '#ffffff', accentColor: '#000000' };
+      
+      render(
+        <ParameterPanel
+          fractalType={5}
+          parameters={params}
+          enabled={true}
+          onUpdate={onUpdate}
+          isDragging={false}
+          draggingParam={null}
+          setIsDragging={setIsDragging}
+          setDraggingParam={setDraggingParam}
+        />
+      );
+
+      expect(screen.getByLabelText('Scale')).toBeInTheDocument();
+    });
+
     it('handles dragging events', () => {
       const onUpdate = vi.fn();
       const setIsDragging = vi.fn();
@@ -131,6 +153,60 @@ describe('ParameterControls', () => {
 
       fireEvent.touchEnd(paramSlider);
       expect(setIsDragging).toHaveBeenCalledWith(false);
+    });
+
+    it('returns null when disabled and handles Mandelbox parameters and drag events', () => {
+      const onUpdate = vi.fn();
+      const setIsDragging = vi.fn();
+      const setDraggingParam = vi.fn();
+      const params = { param1: 2.0, param2: 0.135, param3: 1.0 };
+
+      const { container, rerender } = render(
+        <ParameterPanel
+          fractalType={4}
+          parameters={params}
+          enabled={false}
+          onUpdate={onUpdate}
+          isDragging={false}
+          draggingParam={null}
+          setIsDragging={setIsDragging}
+          setDraggingParam={setDraggingParam}
+        />
+      );
+      expect(container.firstChild).toBeNull();
+
+      rerender(
+        <ParameterPanel
+          fractalType={4}
+          parameters={params}
+          enabled={true}
+          onUpdate={onUpdate}
+          isDragging={true}
+          draggingParam="param2"
+          setIsDragging={setIsDragging}
+          setDraggingParam={setDraggingParam}
+        />
+      );
+
+      const minRadiusSlider = screen.getByLabelText('Min Radius');
+      const fixedRadiusSlider = screen.getByLabelText('Fixed Radius');
+
+      fireEvent.mouseDown(minRadiusSlider);
+      expect(setDraggingParam).toHaveBeenCalledWith('param2');
+      fireEvent.mouseUp(minRadiusSlider);
+      expect(setDraggingParam).toHaveBeenCalledWith(null);
+      fireEvent.touchStart(minRadiusSlider);
+      fireEvent.touchEnd(minRadiusSlider);
+
+      fireEvent.mouseDown(fixedRadiusSlider);
+      expect(setDraggingParam).toHaveBeenCalledWith('param3');
+      fireEvent.mouseUp(fixedRadiusSlider);
+      fireEvent.touchStart(fixedRadiusSlider);
+      fireEvent.touchEnd(fixedRadiusSlider);
+
+      const colorInputs = container.querySelectorAll('input[type="color"]');
+      fireEvent.change(colorInputs[1]!, { target: { value: '#00ff00' } });
+      expect(onUpdate).toHaveBeenCalledWith({ accentColor: '#00ff00' });
     });
   });
 });

@@ -90,6 +90,10 @@ export default function App() {
   const framesSinceLastFpsRef = useRef<number>(0);
 
   // --- Performance Adaptation ---
+  // Treat active slider dragging as interactive so parameter/slicer tweaks render at smooth 30fps
+  // and progressively refine once the user releases the slider.
+  const activeInteracting = isInteracting || isDragging;
+
   const {
     interactiveEpsilon,
     settledEpsilon,
@@ -97,7 +101,7 @@ export default function App() {
     settledIterations,
     onFrameTime,
     overrideKnobs
-  } = usePerformanceAdaptation(fractalType, isInteracting);
+  } = usePerformanceAdaptation(fractalType, activeInteracting);
 
   /**
    * Updates the current fractal view state with a partial update.
@@ -227,7 +231,7 @@ export default function App() {
     // Performance optimization: 
     // If not interacting and quality is already locked (maximum quality for current view reached),
     // we stop updating timers and adaptation logic to save CPU/Battery.
-    if (!isInteracting && isSettledQualityLocked && !isMoving) {
+    if (!activeInteracting && isSettledQualityLocked && !isMoving) {
       return;
     }
 
@@ -245,7 +249,7 @@ export default function App() {
     
     // Smoothly transition settleTime from 0.0 (interactive) to 1.0 (settled).
     // This TSL uniform is used in shaders to interpolate between interactive and settled precision.
-    if (isInteracting) {
+    if (activeInteracting) {
       settleTimeRef.current = 0;
     } else {
       settleTimeRef.current = Math.min(1.0, settleTimeRef.current + delta * 2.5);
@@ -260,27 +264,30 @@ export default function App() {
     // 2. The adaptation hook reports it has reached a stable point (updated === false).
     // 3. The visual transition to settled mode is complete (settleTime === 1.0).
     // 4. There is no background movement (momentum/animation).
-    if (!isInteracting && updated === false && settleTimeRef.current >= 1.0 && !isActuallyMoving) {
+    if (!activeInteracting && updated === false && settleTimeRef.current >= 1.0 && !isActuallyMoving) {
       setIsSettledQualityLocked(true);
     }
-  }, [isInteracting, onFrameTime, isSettledQualityLocked, lastActualMoveTimeRef]);
+  }, [activeInteracting, onFrameTime, isSettledQualityLocked, lastActualMoveTimeRef]);
 
   // --- Render Calculations ---
   const currentView = fractalViews[fractalType];
   const { zoom, offset, rotation, parameters, slicer } = currentView;
   
-  // zoomFactor represents the doubling of magnification.
-  // We use this to provide a "Manual LOD Boost" that stacks with the adaptive systems.
-  const zoomFactor = Math.log2(Math.max(1, zoom));
+  // zoomFactor represents the doubling of magnification relative to the fractal's default zoom.
+  // Using zoom / defaultZoom ensures fractals with small initial zoom (e.g. Mandelbox at 0.15)
+  // still receive proper LOD iteration boosts as you zoom in.
+  const defaultZoom = FRACTAL_CONFIGS[fractalType.toString()]?.zoom || 1.0;
+  const zoomFactor = Math.max(0, Math.log2(Math.max(1, zoom / defaultZoom)));
 
-  // Boost iterations as we zoom in to maintain surface detail at extreme scales.
-  // We clamp the interactive iterations boost so we don't completely destroy framerate.
-  const finalInteractiveIterations = Math.max(interactiveIterations, interactiveIterations + Math.min(12, Math.floor(zoomFactor * 0.5)));
-  const finalSettledIterations = Math.max(settledIterations, settledIterations + Math.min(32, Math.floor(zoomFactor * 3.0)));
+  // Boost iterations as we zoom in to maintain 3D structural detail at extreme scales.
+  // Keeping interactive iterations close to settled iterations prevents deep-zoom geometry
+  // from collapsing or vanishing while rotating and panning.
+  const finalInteractiveIterations = Math.max(interactiveIterations, interactiveIterations + Math.min(20, Math.floor(zoomFactor * 1.5)));
+  const finalSettledIterations = Math.max(settledIterations, settledIterations + Math.min(36, Math.floor(zoomFactor * 2.5)));
   
-  // Loosen the hit-detection threshold (epsilon) when interacting at high zoom levels
-  // to maintain interactive frame rates without completely blowing out the settled quality.
-  const finalInteractiveEpsilon = interactiveEpsilon * (1.0 + Math.max(0, zoomFactor * 1.5));
+  // Keep interactiveEpsilon proportional to screen-space pixel size across zoom levels
+  // (fractalEngine.ts already scales distance by uniformZoom in world space).
+  const finalInteractiveEpsilon = interactiveEpsilon;
   
   const handleScreenshot = async () => {
     if (isCapturing) return;
@@ -370,7 +377,8 @@ export default function App() {
           onUpdateKnobs={(knobs) => {
             overrideKnobs(knobs);
             if (knobs.settledIterations !== undefined || knobs.settledEpsilon !== undefined) {
-              setIsSettledQualityLocked(false);
+              // Lock settled quality so the automatic controller does not immediately overwrite manual debug overrides
+              setIsSettledQualityLocked(true);
             }
             if (knobs.interactiveSteps !== undefined) setInteractiveSteps(knobs.interactiveSteps);
             if (knobs.settledSteps !== undefined) setSettledSteps(knobs.settledSteps);
@@ -381,7 +389,7 @@ export default function App() {
       <FractalCanvas 
         {...currentView}
         fractalType={fractalType} 
-        isInteracting={isInteracting}
+        isInteracting={activeInteracting}
         interactionType={interactionType}
         isSettledQualityLocked={isSettledQualityLocked}
         adaptiveIterations={finalInteractiveIterations}

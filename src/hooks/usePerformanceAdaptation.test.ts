@@ -57,9 +57,44 @@ describe('usePerformanceAdaptation Hook', () => {
     const laggyEpsilon = result.current.interactiveEpsilon;
     expect(laggyEpsilon).toBeGreaterThan(0.0005); // Verify it actually moved
     
-    // Note: Testing the recovery (quality increase) is difficult in a single test run
-    // due to the smoothing of the frame delta and the deadband logic.
-    // The logic has been verified manually and through the "settled" mode tests.
+    // Now simulate fast frames (5ms < 33ms target) so EMA recovers and increases interactive quality
+    act(() => {
+      const now = performance.now() + 5000;
+      for (let i = 0; i < 40; i++) {
+        result.current.onFrameTime(0.005, now + i * 100);
+      }
+    });
+
+    expect(result.current.interactiveEpsilon).toBeLessThan(laggyEpsilon);
+  });
+
+  it('supports overriding all performance knobs and preserves state across fractal switches', () => {
+    const { result, rerender } = renderHook(
+      ({ fractal, isInteracting }) => usePerformanceAdaptation(fractal, isInteracting),
+      { initialProps: { fractal: 0, isInteracting: false } }
+    );
+
+    act(() => {
+      result.current.overrideKnobs({
+        interactiveIterations: 9,
+        settledIterations: 13,
+        interactiveEpsilon: 0.0012,
+        settledEpsilon: 0.00025
+      });
+    });
+
+    expect(result.current.interactiveIterations).toBe(9);
+    expect(result.current.settledIterations).toBe(13);
+    expect(result.current.interactiveEpsilon).toBe(0.0012);
+    expect(result.current.settledEpsilon).toBe(0.00025);
+
+    // Switch to Menger Sponge (fractal 1)
+    rerender({ fractal: 1, isInteracting: false });
+    expect(result.current.settledIterations).toBe(FRACTAL_CONFIGS["1"].defaultSettledIterations);
+
+    // Switch back to Mandelbulb (fractal 0) - learned/overridden state should still be preserved
+    rerender({ fractal: 0, isInteracting: false });
+    expect(result.current.settledIterations).toBe(13);
   });
 
   it('decreases quality in settled mode if lagging badly but respects interactive floor', () => {

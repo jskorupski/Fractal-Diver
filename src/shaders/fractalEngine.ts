@@ -1,11 +1,29 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { wgslFn } from 'three/tsl';
 
 /**
- * Fractal Engine WGSL implementation.
- * This file contains the core raymarching logic and distance estimation functions
- * for various 3D fractals.
- * 
- * Improved with descriptive variable names and comprehensive comments as requested.
+ * Core WebGPU Shading Language (WGSL) raymarching engine compiled via Three.js TSL.
+ *
+ * Architecture Overview:
+ * 1. Primary Raymarching (`renderFractal`):
+ *    - Casts camera-relative rays through a screen-space quad.
+ *    - Bounds the surface hit threshold (`effectiveEpsilon * totalDist`) by the angular footprint
+ *      of a screen pixel (`pixelScale`) to prevent marching into sub-pixel fractal needles.
+ *    - Smoothly interpolates step budgets, epsilon thresholds, and fractal iterations between
+ *      interactive (30 FPS target) and settled (5 FPS progressive refinement) states via `uniformSettleTime`.
+ * 2. Surface Normals & Lighting:
+ *    - Evaluates surface gradients in fractal space using Inigo Quilez's 4-tap tetrahedral
+ *      central-difference stencil filtered across the pixel footprint.
+ *    - Combines fractal-space multi-sample Ambient Occlusion (`distAO`) with crevasse step-count
+ *      occlusion (`stepAO`), a camera-attached key/fill lighting rig, Blinn-Phong specular highlights,
+ *      Fresnel rim lighting, orbit-trap palette blending, and ACES filmic tonemapping.
+ * 3. Distance Estimators (`get*Data`):
+ *    - Analytic and IFS distance estimators for Mandelbulb, Menger Sponge, 3D Julia Set,
+ *      Sierpinski Tetrahedron, Mandelbox, and Apollonian Gasket, plus optional CSG half-space slicing.
  */
 export const renderFractal = wgslFn(`
   fn renderFractal(
@@ -47,12 +65,18 @@ export const renderFractal = wgslFn(`
     var totalDist = 0.1;
     var stepCount = 0;
     var isHit = false;
+    var hitOrbitTrap = 0.0;
     
     // Dynamic raymarching steps
-    // We scale the number of raymarching steps based on whether we are settled or interacting.
-    // When settled, we also increase steps at higher zoom levels (lodFactor).
-    let baseSteps = mix(uniformInteractiveSteps, mix(uniformInteractiveSteps * 2.0, uniformSettledSteps, lodFactor), uniformSettleTime);
+    // Scale between interactiveSteps and settledSteps based on settleTime, with an extra LOD boost at deep zoom.
+    let settledTargetSteps = min(1024.0, uniformSettledSteps * (1.0 + lodFactor * 0.25));
+    let baseSteps = mix(uniformInteractiveSteps, settledTargetSteps, uniformSettleTime);
     let maxSteps = i32(baseSteps);
+    
+    // Screen-space pixel cone scale (1 pixel angular width at unit distance)
+    // Prevents marching into sub-pixel fractal needles that alias into salt-and-pepper noise.
+    let pixelScale = 1.0 / max(300.0, resolution.y * 1.5);
+    let effectiveEpsilon = max(pixelScale * 0.35, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime));
     
     // --- Raymarching Loop ---
     for (var i = 0; i < 1024; i = i + 1) {
@@ -60,9 +84,8 @@ export const renderFractal = wgslFn(`
       
       let currentPoint = rayOrigin + rayDirection * totalDist;
       
-      // Dynamic precision threshold
-      // User requested more conservative threshold when settled to reduce graininess
-      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist);
+      // Dynamic precision threshold bounded by sub-pixel cone radius
+      let threshold = max(0.0000005, effectiveEpsilon * totalDist);
       
       // Transform to global fractal space
       let globalPoint = (currentPoint - uniformOffset) / uniformZoom + uniformOffset;
@@ -86,11 +109,12 @@ export const renderFractal = wgslFn(`
       
       if (dist < threshold) {
         isHit = true;
+        hitOrbitTrap = data.y;
         break;
       }
       
       totalDist = totalDist + max(threshold * 0.25, dist);
-      stepCount = i;
+      stepCount = i + 1;
       
       // Escape distance
       if (totalDist > mix(50.0, 100.0, uniformSettleTime)) { break; }
@@ -99,37 +123,32 @@ export const renderFractal = wgslFn(`
     // --- Shading ---
     if (isHit) {
       let hitPoint = rayOrigin + rayDirection * totalDist;
-      
-      // Dynamic precision threshold for normal calculation
-      // We use a larger epsilon for normals than for raymarching to smooth out high-frequency noise
-      // and prevent floating-point precision issues (catastrophic cancellation) at high iterations.
-      let threshold = max(0.0000001, mix(uniformInteractiveEpsilon, uniformSettledEpsilon, uniformSettleTime) * totalDist);
-      // normalEpsilon is scaled by threshold to ensure we sample far enough away to get a valid gradient
-      let normalEpsilon = max(0.0001, threshold * 3.0);
-      
-      // Normal calculation via finite difference (central difference would be 6 samples, 
-      // but we use 4 samples/forward difference for performance)
       let pG = (hitPoint - uniformOffset) / uniformZoom + uniformOffset;
-      let hitData = getFractalData(pG, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting);
-      let dC = hitData.x;
       
-      let pX = (hitPoint + vec3<f32>(normalEpsilon, 0.0, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
-      let dX = getFractalData(pX, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+      // Dynamic precision threshold for normal calculation in fractal space.
+      // Using Inigo Quilez's 4-tap tetrahedral central difference filtered across the pixel footprint
+      // avoids directional bias, eliminates sub-pixel normal aliasing (graininess), and saves a 5th SDF call.
+      let threshold = max(0.0000005, effectiveEpsilon * totalDist);
+      let pixelFootprint = pixelScale * totalDist;
+      let normalEpsilon = max(0.000005, max(threshold * 2.5, pixelFootprint * 0.75) / uniformZoom);
       
-      let pY = (hitPoint + vec3<f32>(0.0, normalEpsilon, 0.0) - uniformOffset) / uniformZoom + uniformOffset;
-      let dY = getFractalData(pY, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+      let k1 = vec3<f32>( 1.0, -1.0, -1.0);
+      let k2 = vec3<f32>(-1.0, -1.0,  1.0);
+      let k3 = vec3<f32>(-1.0,  1.0, -1.0);
+      let k4 = vec3<f32>( 1.0,  1.0,  1.0);
       
-      let pZ = (hitPoint + vec3<f32>(0.0, 0.0, normalEpsilon) - uniformOffset) / uniformZoom + uniformOffset;
-      let dZ = getFractalData(pZ, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+      let d1 = getFractalData(pG + k1 * normalEpsilon, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+      let d2 = getFractalData(pG + k2 * normalEpsilon, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+      let d3 = getFractalData(pG + k3 * normalEpsilon, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+      let d4 = getFractalData(pG + k4 * normalEpsilon, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
       
-      let normal = normalize(vec3<f32>(dX, dY, dZ) - dC);
+      let rawNormal = k1 * d1 + k2 * d2 + k3 * d3 + k4 * d4;
+      let normal = select(vec3<f32>(0.0, 0.0, -1.0), normalize(rawNormal), dot(rawNormal, rawNormal) > 1e-20);
       
       // Lighting components
-      // 1. Distance-based Ambient Occlusion (IQ's method)
-      // Probes the SDF along the normal to determine how occluded the surface is.
-      // Expensive, so we skip it during interaction and limit to 3 steps for performance.
+      // 1. Distance-based Ambient Occlusion (IQ's method) evaluated in fractal space and scaled by zoom & distance.
       var distAO = 1.0;
-      if (uniformInteracting < 0.5) {
+      if (uniformInteracting < 0.5 && uniformSettleTime > 0.01) {
         var occ = 0.0;
         var sca = 1.0;
         
@@ -138,15 +157,19 @@ export const renderFractal = wgslFn(`
         if (stepCount > 250) { aoSteps = 1; }
         else if (stepCount > 120) { aoSteps = 2; }
         
+        let distanceScale = max(0.05, totalDist / 5.0);
         for (var i = 0; i < 3; i = i + 1) {
           if (i >= aoSteps) { break; }
-          let hr = 0.015 + 0.03 * f32(i); // slightly wider spread
-          let aopos = hitPoint + normal * hr;
-          let dd = getFractalData(aopos, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
-          occ += -(dd - hr) * sca;
+          let hrWorld = (0.015 + 0.03 * f32(i)) * distanceScale;
+          let hrFractal = hrWorld / uniformZoom;
+          let aopos = pG + normal * hrFractal;
+          let ddFractal = getFractalData(aopos, uniformType, uniformParameters, uniformSettleTime, zoomLOD, uniformSlicerEnabled, uniformSlicerOffset, uniformSlicerAxis, uniformInteractionType, uniformAdaptiveIterations, uniformAdaptiveSettledIterations, uniformInteracting).x;
+          let ddWorld = ddFractal * uniformZoom;
+          occ += max(0.0, hrWorld - ddWorld) * sca;
           sca *= 0.7; // falloff
         }
-        distAO = clamp(1.0 - 2.5 * occ, 0.0, 1.0);
+        let targetAO = clamp(1.0 - 2.5 * (occ / distanceScale), 0.0, 1.0);
+        distAO = mix(1.0, targetAO, uniformSettleTime);
       }
       
       // 2. Step-count AO: High step counts (deep in crevasses) result in darker colors.
@@ -154,18 +177,19 @@ export const renderFractal = wgslFn(`
       
       let ambientOcclusion = distAO * stepAO;
       
-      let mainLightDir = normalize(vec3<f32>(0.8, 1.2, -0.8));
+      // Camera-relative lighting rig so fractal detail stays well-lit from every 360-degree orbit angle
+      let mainLightDir = uniformRotation * normalize(vec3<f32>(0.8, 1.2, -0.8));
       let mainDiffuse = max(0.0, dot(normal, mainLightDir));
       
       // Secondary fill light illuminates the shadowed areas to show ridge details
-      let fillLightDir = normalize(vec3<f32>(-0.6, -0.2, 0.8));
+      let fillLightDir = uniformRotation * normalize(vec3<f32>(-0.6, -0.2, -0.5));
       let fillDiffuse = max(0.0, dot(normal, fillLightDir));
       
-      let diffuse = mainDiffuse * 0.6 + fillDiffuse * 0.25 + 0.15; // Max 1.0 total
+      let diffuse = mainDiffuse * 0.65 + fillDiffuse * 0.22 + 0.13; // Max 1.0 total
       
-      // Specular Highlight makes ridges catch the light and look sharper - reduced for a more matte look
+      // Specular Highlight makes ridges catch the light and look sharper
       let halfVector = normalize(mainLightDir - rayDirection);
-      let specular = pow(max(0.0, dot(normal, halfVector)), 32.0) * 0.1;
+      let specular = pow(max(0.0, dot(normal, halfVector)), 32.0) * 0.12;
       
       // Rim Lighting: Adds a subtle glow at the edges of the fractal for better depth perception.
       let rim = pow(1.0 - max(0.0, dot(normal, -rayDirection)), 4.0);
@@ -175,13 +199,13 @@ export const renderFractal = wgslFn(`
       
       // Orbit Trap Coloring: Uses the auxiliary data from distance estimation (e.g. min radius reached)
       // to mix the accent color into the base color.
-      let colorFactor = clamp(hitData.y, 0.0, 1.0);
+      let colorFactor = clamp(hitOrbitTrap, 0.0, 1.0);
       let boostedFactor = smoothstep(0.0, 1.0, colorFactor);
       baseColor = mix(baseColor, accentColor, boostedFactor);
       
-      // Position-based color variation: adds extremely subtle texture to plain surfaces.
-      let variation = fract(hitPoint / uniformZoom * 0.2 + 0.5);
-      baseColor = mix(baseColor, variation, 0.08);
+      // Smooth cosine position-based color variation (avoids fract() sawtooth grid seams)
+      let variation = 0.5 + 0.5 * cos(pG * 1.25);
+      baseColor = mix(baseColor, variation, 0.06);
       
       let rawColor = (baseColor * diffuse + vec3<f32>(specular) + vec3<f32>(rim * 0.15)) * ambientOcclusion;
       
@@ -208,44 +232,50 @@ export const renderFractal = wgslFn(`
   // --- Distance Estimation Functions ---
   
   /**
-   * Mandelbulb Distance Estimator
-   * Returns vec2(distance, colorFactor)
+   * Mandelbulb Distance Estimator (Triplex Algebra).
+   * Evaluates z_{n+1} = z_n^p + c in spherical coordinates alongside its scalar running derivative.
+   * Synchronizes radius and derivative updates at the end of each iteration and applies a 0.8
+   * step relaxation factor to compensate for non-conformal triplex distortion.
+   * Returns vec2(signedDistance, orbitTrapFactor).
    */
   fn getMandelbulbData(point: vec3<f32>, power: f32, iterations: i32) -> vec2<f32> {
     var z = point;
     var derivative = 1.0;
-    var radius = 0.0;
-    var orbitTrap = 1e10;
+    var radius = length(z);
+    var orbitTrap = dot(z, z);
     
     for (var i = 0; i < 128; i = i + 1) {
-      if (i >= iterations) { break; }
+      if (i >= iterations || radius > 4.0) { break; }
       
-      radius = length(z);
-      orbitTrap = min(orbitTrap, dot(z, z));
-      if (radius > 4.0) { break; }
-      
-      // Convert to spherical coordinates
-      let theta = acos(z.z / radius);
+      // Convert to spherical coordinates (clamped to prevent acos NaN at origin or f32 drift)
+      let safeRadius = max(1e-10, radius);
+      let theta = acos(clamp(z.z / safeRadius, -1.0, 1.0));
       let phi = atan2(z.y, z.x);
       
-      // Calculate derivative for distance estimation
-      derivative = pow(radius, power - 1.0) * power * derivative + 1.0;
+      // Calculate derivative for distance estimation: dz_{n+1} = p * r^(p-1) * dz_n + 1
+      derivative = pow(safeRadius, power - 1.0) * power * derivative + 1.0;
       
       // Raise radius to the power and multiply by the spherical components
-      let zr = pow(radius, power);
+      let zr = pow(safeRadius, power);
       z = zr * vec3<f32>(
         sin(theta * power) * cos(phi * power), 
         sin(phi * power) * sin(theta * power), 
         cos(theta * power)
       ) + point;
+      
+      radius = length(z);
+      orbitTrap = min(orbitTrap, dot(z, z));
     }
     
-    return vec2<f32>(0.5 * log(radius) * radius / derivative, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
+    let safeR = max(1.0001, radius);
+    let dist = 0.5 * log(safeR) * safeR / max(1e-10, derivative);
+    return vec2<f32>(dist * 0.8, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
   }
 
   /**
-   * Menger Sponge Distance Estimator
-   * Returns vec2(distance, colorFactor)
+   * Menger Sponge Distance Estimator (Iterated Function System).
+   * Subtracts recursive orthogonal cross-channels from a unit cube via modular space folding.
+   * Returns vec2(signedDistance, structuralDepthTrap).
    */
   fn getMengerSpongeData(point: vec3<f32>, scale: f32, iterations: i32) -> vec2<f32> {
     var z = point;
@@ -279,19 +309,22 @@ export const renderFractal = wgslFn(`
   }
 
   /**
-   * Julia Set Distance Estimator
-   * Returns vec2(distance, colorFactor)
+   * 3D Julia Set Distance Estimator.
+   * Iterates a 3D hypercomplex quadratic map z_{n+1} = z_n^2 + c with a fixed constant c.
+   * Clamps both the running derivative and final radius to prevent interior f32 underflow or log(0) NaNs.
+   * Returns vec2(signedDistance, orbitTrapFactor).
    */
   fn getJuliaData(point: vec3<f32>, constant: vec3<f32>, iterations: i32) -> vec2<f32> {
     var z = point;
     var derivative = 1.0;
-    var orbitTrap = 1e10;
+    var orbitTrap = dot(z, z);
+    var radius = length(z);
     
     for (var i = 0; i < 128; i = i + 1) {
-      if (i >= iterations) { break; }
+      if (i >= iterations || radius > 4.0) { break; }
       
       // Calculate the derivative for distance estimation: d(z^2 + c)/dz = 2z
-      derivative = 2.0 * length(z) * derivative;
+      derivative = max(1e-20, 2.0 * radius * derivative);
       
       // Apply the Julia iteration: z = z^2 + c
       // This is a 3D extension of the complex Julia set.
@@ -302,15 +335,17 @@ export const renderFractal = wgslFn(`
       ) + constant;
       
       orbitTrap = min(orbitTrap, dot(z, z));
-      if (length(z) > 4.0) { break; }
+      radius = length(z);
     }
     // Distance estimation formula: 0.5 * |z| * log(|z|) / |z'|
-    return vec2<f32>(0.5 * length(z) * log(length(z)) / derivative, clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
+    let safeR = max(1.0001, radius);
+    return vec2<f32>(0.5 * safeR * log(safeR) / max(1e-10, derivative), clamp(sqrt(orbitTrap) / 2.0, 0.0, 1.0));
   }
 
   /**
-   * Sierpinski Tetrahedron Distance Estimator
-   * Returns vec2(distance, colorFactor)
+   * Sierpinski Tetrahedron Distance Estimator (KIFS).
+   * Folds space across three symmetry planes of a regular tetrahedron and applies uniform homothety.
+   * Returns vec2(signedDistance, foldDensityTrap).
    */
   fn getSierpinskiData(point: vec3<f32>, scale: f32, iterations: i32) -> vec2<f32> {
     var z = point;
@@ -328,8 +363,9 @@ export const renderFractal = wgslFn(`
   }
 
   /**
-   * Mandelbox Distance Estimator
-   * Returns vec2(distance, colorFactor)
+   * Mandelbox Distance Estimator (Tom Lowe's Box + Sphere Fold).
+   * Alternates cubic box reflections in [-1, 1]^3 with spherical inversion between minRadius and fixedRadius.
+   * Returns vec2(signedDistance, orbitTrapFactor).
    */
   fn getMandelboxData(point: vec3<f32>, scale: f32, minRadius: f32, fixedRadius: f32, iterations: i32) -> vec2<f32> {
     var z = point;
@@ -368,8 +404,9 @@ export const renderFractal = wgslFn(`
   }
 
   /**
-   * Apollonian Gasket Distance Estimator
-   * Returns vec2(distance, colorFactor)
+   * Apollonian Gasket Distance Estimator.
+   * Combines periodic domain wrapping with Kleinian spherical inversion to generate foam-like sphere packings.
+   * Returns vec2(signedDistance, orbitTrapFactor).
    */
   fn getApollonianData(point: vec3<f32>, scale: f32, iterations: i32) -> vec2<f32> {
     var z = point;
@@ -390,7 +427,9 @@ export const renderFractal = wgslFn(`
   }
 
   /**
-   * Master Distance and Data Estimator
+   * Master Fractal Dispatcher & CSG Slicer.
+   * Interpolates iteration counts between interactive and settled targets, dispatches to the selected
+   * fractal's Distance Estimator, and applies optional Constructive Solid Geometry (CSG) half-space slicing.
    */
   fn getFractalData(
     point: vec3<f32>,
@@ -408,27 +447,22 @@ export const renderFractal = wgslFn(`
   ) -> vec2<f32> {
     var data: vec2<f32> = vec2<f32>(10.0, 0.0);
     
-    // If interacting, use uAdaptiveIterations. If settled, use uAdaptiveSettledIterations + zoomLOD bonus.
-    // We don't mix based on settleTime because React smoothly increases uAdaptiveSettledIterations.
-    let baseIter = mix(uAdaptiveSettledIterations, uAdaptiveIterations, uInteracting);
+    // Smoothly transition iterations from interactive to settled based on settleTime.
+    // Zoom-based iteration boosts are computed cleanly in App.tsx and passed in uAdaptiveIterations / uAdaptiveSettledIterations.
+    let effectiveSettle = select(settleTime, 0.0, uInteracting > 0.5);
+    let iter = max(1, i32(round(mix(uAdaptiveIterations, uAdaptiveSettledIterations, effectiveSettle))));
     
     if (fractalType == 0) {
-      let iter = i32(baseIter + mix(zoomLOD * 0.5, 0.0, uInteracting));
       data = getMandelbulbData(point, params.y, iter);
     } else if (fractalType == 1) {
-      let iter = i32(baseIter + mix(zoomLOD * 0.3, 0.0, uInteracting));
       data = getMengerSpongeData(point, params.y, iter);
     } else if (fractalType == 2) {
-      let iter = i32(baseIter + mix(zoomLOD * 0.8, 0.0, uInteracting));
       data = getJuliaData(point, vec3<f32>(params.z, params.w, 0.1), iter);
     } else if (fractalType == 3) {
-      let iter = i32(baseIter + mix(zoomLOD, 0.0, uInteracting));
       data = getSierpinskiData(point, params.y, iter);
     } else if (fractalType == 4) {
-      let iter = i32(baseIter + mix(zoomLOD * 0.4, 0.0, uInteracting));
       data = getMandelboxData(point, params.y, params.z, params.w, iter);
     } else if (fractalType == 5) {
-      let iter = i32(baseIter + mix(zoomLOD * 0.5, 0.0, uInteracting));
       data = getApollonianData(point, params.y, iter);
     }
 

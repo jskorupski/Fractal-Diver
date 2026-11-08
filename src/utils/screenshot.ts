@@ -1,8 +1,22 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import * as THREE from 'three';
 import { WebGPURenderer, MeshBasicNodeMaterial } from 'three/webgpu';
 import { uniform, uv, int } from 'three/tsl';
 import { renderFractal } from '../shaders/fractalEngine';
 
+/**
+ * Renders and downloads an Ultra-HD JPEG wallpaper of the current fractal view.
+ *
+ * Creates an isolated offscreen `WebGPURenderer` and orthographic full-screen quad configured
+ * with the current settled quality parameters (`uniformSettleTime = 1.0`). Standard desktop
+ * displays (DPR < 2) are supersampled at 2x and downsampled with high-quality bicubic filtering,
+ * while all renders are capped at a 3840px (4K UHD) maximum dimension to prevent GPU timeouts
+ * on high-DPI mobile and Retina screens.
+ */
 export const takeWallpaperScreenshot = async (props: any) => {
     // scale for supersampling, but cap resolution to avoid exceeding WebGPU texture limits (~8192)
     const nativeWidth = window.screen.width * window.devicePixelRatio;
@@ -16,15 +30,15 @@ export const takeWallpaperScreenshot = async (props: any) => {
     // Default to 2x on regular desktop monitors.
     let scale = window.devicePixelRatio >= 2 ? 1 : 2;
     
-    // Cap at 3840 (approx 4K) maximum dimension to avoid mobile GPU hangs
+    // Cap at 3840 (approx 4K) maximum dimension to avoid mobile/high-DPI GPU hangs
     if (maxDimension * scale > 3840) {
-        scale = Math.max(1, 3840 / maxDimension); 
+        scale = 3840 / maxDimension; 
     }
     
-    const finalWidth = nativeWidth;
-    const finalHeight = nativeHeight;
-    const renderWidth = finalWidth * scale;
-    const renderHeight = finalHeight * scale;
+    const finalWidth = Math.round(Math.min(nativeWidth, nativeWidth * scale));
+    const finalHeight = Math.round(Math.min(nativeHeight, nativeHeight * scale));
+    const renderWidth = Math.round(nativeWidth * scale);
+    const renderHeight = Math.round(nativeHeight * scale);
 
     const renderCanvas = document.createElement('canvas');
     renderCanvas.width = renderWidth;

@@ -77,13 +77,13 @@ export const ParameterPanel: React.FC<ParameterPanelProps> = ({
           <div className={`flex flex-col gap-2 transition-opacity duration-300 ${draggingParam && draggingParam !== 'param1' ? 'opacity-20' : 'opacity-100'}`}>
             <div className="flex justify-between items-center">
               <span className="text-[9px] font-mono uppercase text-cyan-500/60">
-                {fractalType === 0 ? 'Power' : (fractalType === 1 || fractalType === 3 || fractalType === 4) ? 'Scale' : 'Param 1'}
+                {fractalType === 0 ? 'Power' : 'Scale'}
               </span>
               <span className="text-[10px] font-mono text-cyan-400">{parameters.param1.toFixed(2)}</span>
             </div>
             <input 
               type="range" 
-              aria-label={fractalType === 0 ? 'Power' : (fractalType === 1 || fractalType === 3 || fractalType === 4) ? 'Scale' : 'Param 1'}
+              aria-label={fractalType === 0 ? 'Power' : 'Scale'}
               min={fractalType === 0 ? "2" : "1"} 
               max={fractalType === 0 ? "20" : (fractalType === 1 ? "12" : "5")} 
               step="0.01"

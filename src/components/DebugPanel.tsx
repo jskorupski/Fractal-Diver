@@ -1,6 +1,14 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import { Bug, X } from 'lucide-react';
 
+/**
+ * Props for the DebugPanel component.
+ */
 interface DebugPanelProps {
   expanded: boolean;
   onClose: () => void;
@@ -26,6 +34,12 @@ interface DebugPanelProps {
   }) => void;
 }
 
+/**
+ * DebugPanel Component.
+ * Displays live telemetry (FPS, frame spinner, settle progress) polled at 2Hz to avoid React
+ * re-render overhead during raymarching, and provides direct numeric overrides for epsilon,
+ * iteration limits, and raymarching step budgets when settled.
+ */
 export default function DebugPanel({ 
   expanded,
   onClose,
@@ -49,9 +63,8 @@ export default function DebugPanel({
     fps: 0,
     renderCount: 0,
   });
-  const requestRef = useRef<number>(0);
   
-  // Use a ref to hold the latest props so requestAnimationFrame doesn't use a stale closure
+  // Use a ref to hold the latest props so the polling interval never reads a stale closure
   const propsRef = useRef({ 
     currentInteractiveIterations, 
     currentSettledIterations, 

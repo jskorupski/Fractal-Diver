@@ -2,57 +2,75 @@
 
 <img src="logo.svg" alt="Fractal Diver Logo" width="256" />
 
-> **Dive into the infinite.** A high-performance, real-time 3D fractal explorer powered by WebGPU and WGSL.
+> **Dive into the infinite.** A real-time 3D fractal explorer powered by WebGPU and custom WGSL raymarching shaders.
 
 **Live Demo:** [fractal.skorupski.org](https://fractal.skorupski.org)
 
-Fractal Diver allows users to explore complex mathematical structures in three dimensions. Using the latest WebGPU technology and custom WGSL raymarching shaders, it renders stunning fractals with incredible detail and fluid performance. Built in [AI Studio](https://ai.studio).
+Fractal Diver lets you fly through six classic three-dimensional fractals in real time right in your browser. Built on **WebGPU** and **Three.js Shading Language (TSL)**, it combines analytic and Iterated Function System (IFS) distance estimators with a closed-loop adaptive performance engine—maintaining fluid camera motion while you explore and progressively refining surface detail the moment you stop. Built with Gemini.
 
 ---
 
 **Author:** James Skorupski
 
-## Features
+## ✨ Features
 
-- **Real-time 3D Raymarching**: Explore 6 distinct fractal types in full 3D:
-  - Mandelbulb
-  - Menger Sponge
-  - Julia Set
-  - Sierpinski Tetrahedron
-  - Mandelbox
-  - Apollonian Gasket
-- **WebGPU Powered**: Leverages the next generation of web graphics with custom WGSL shaders for high-fidelity, hardware-accelerated rendering.
-- **Adaptive Performance Engine**: Features a custom PD-controller that dynamically adjusts raymarching iterations and precision (epsilon) in real-time to maintain smooth framerates (30fps during interaction, prioritizing quality when settled).
-- **Cinematic Camera**: Smooth, fluid navigation with zoom-aware sensitivity and SLERP-based rotations.
-- **Interactive Parameters**: Fine-tune fractal shapes, scale, and mathematical constants in real-time.
-- **Dynamic Slicing**: Cut through 3D structures along any axis to reveal their internal complexity.
+- **Six Real-Time 3D Fractals**:
+  - **Mandelbulb** — Triplex spherical power fractal ($z_{n+1} = z_n^p + c$) with organic canyons and bulbs.
+  - **Menger Sponge** — Recursive orthogonal cross-channel IFS with infinitely nested architectural cavities.
+  - **3D Julia Set** — Hypercomplex quadratic attractor with live-tunable real and imaginary constants.
+  - **Sierpinski Tetrahedron** — Kaleidoscopic IFS (KIFS) folded across tetrahedral symmetry planes.
+  - **Mandelbox** — Tom Lowe's box-and-sphere folding fractal combining cubic reflections with spherical inversions.
+  - **Apollonian Gasket** — Periodic Kleinian sphere-packing foam.
+- **High-Fidelity WebGPU Shading Pipeline**:
+  - **Sub-Pixel Cone Clamping**: Bounds raymarching hit thresholds and normal filter kernels by the angular footprint of a screen pixel to eliminate sub-pixel surface aliasing.
+  - **4-Tap Tetrahedral Normals**: Evaluates surface gradients in fractal space using Inigo Quilez's 4-sample tetrahedral central-difference stencil.
+  - **Hybrid Ambient Occlusion**: Blends multi-sample fractal-space distance occlusion with crevasse step-count shading.
+  - **Camera-Relative Studio Lighting & ACES Tonemapping**: Two-point key/fill lighting attached to the camera rig, Blinn-Phong ridge highlights, Fresnel rim glow, orbit-trap color palettes, and ACES filmic tonemapping.
+- **Closed-Loop Adaptive Performance**:
+  - Uses an asymmetric Exponential Moving Average (EMA) frame-time controller that reacts rapidly to frame drops.
+  - Targets **30 FPS** during camera or slider interaction—biasing load-shedding toward raymarching epsilon so 3D fractal geometry stays intact even at deep zoom—and smoothly transitions into high-precision progressive refinement when settled, locking the frame loop once converged to save power.
+- **Deep-Zoom Camera Physics**:
+  - Frame-rate independent quaternion SLERP rotation and damped translation.
+  - **Progressive Zoom Deceleration**: Automatically scales down zoom increments and rotation sensitivity logarithmically as magnification increases so you can navigate delicate micro-structures without overshooting.
+- **Real-Time CSG Slicer & Live Parameters**:
+  - Slice cleanly through any fractal along the **X**, **Y**, or **Z** axis using Constructive Solid Geometry (CSG) half-space subtraction to inspect internal chambers.
+  - Adjust fractal power, scale, folding radii, Julia constants, and primary/accent color tones in real time.
+- **Ultra-HD Wallpaper Export**:
+  - One-click offscreen WebGPU capture with 2× supersampling (up to 4K UHD) and high-quality bicubic downsampling.
 
-## Tech Stack
+## 🎮 Controls
 
-- **Frontend**: React + TypeScript + Vite
-- **Rendering**: WebGPU + WGSL (Custom Raymarching Engine)
-- **Math/Camera**: Three.js (used for matrix math and camera state, not rendering)
-- **Styling**: Tailwind CSS
-- **Testing**: Vitest + Testing Library
+| Action | Desktop (Mouse & Keyboard) | Mobile / Touch |
+| :--- | :--- | :--- |
+| **Orbit / Rotate** | Left-click + drag | 1-finger drag |
+| **Pan Camera** | `Shift` + Left-click + drag | 2-finger drag |
+| **Zoom In / Out** | Scroll wheel / trackpad pinch | 2-finger pinch |
+| **Slice Interior** | Toggle **Slicer** in bottom toolbar | Toggle **Slicer** in bottom toolbar |
+| **Tune Parameters** | Click **Settings** (gear icon) | Tap **Settings** (gear icon) |
+| **Save Wallpaper** | Click **Camera** icon | Tap **Camera** icon |
+| **Reset View** | Click **Reset** | Tap **Reset** icon |
 
-## Controls
+## 🛠️ Tech Stack
 
-- **Rotate**: Left-click and drag (or 1-finger drag)
-- **Pan**: Shift + Left-click and drag (or 2-finger drag)
-- **Zoom**: Scroll wheel (or pinch-to-zoom)
-- **Reset**: Click the "Reset" button to return to the default view
+- **UI & State**: React 19 + TypeScript + Vite
+- **Rendering Engine**: Three.js (`WebGPURenderer` + TSL / WGSL Node Shaders) + React Three Fiber (`demand` frameloop)
+- **Styling**: Tailwind CSS v4 + Lucide Icons
+- **Testing**: Vitest + React Testing Library + V8 Coverage
+- **Deployment**: Cloudflare Workers / Static Assets (`wrangler`)
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- A browser with **WebGPU** support (Chrome 113+, Edge 113+, or Safari Technology Preview).
+- **Node.js** 20+
+- A browser with **WebGPU** support (Chrome 113+, Edge 113+, Firefox Nightly, or Safari 18+).
 
-### Installation
+### Installation & Local Development
 
 1. Clone the repository:
    ```bash
    git clone https://github.com/jskorupski/Fractal-Diver.git
+   cd Fractal-Diver
    ```
 2. Install dependencies:
    ```bash
@@ -62,14 +80,16 @@ Fractal Diver allows users to explore complex mathematical structures in three d
    ```bash
    npm run dev
    ```
+   Open [http://localhost:3000](http://localhost:3000) in a WebGPU-capable browser.
 
-## Testing
+## 🧪 Scripts & Testing
 
-Run the unit test suite with Vitest:
-```bash
-npm test
-```
+- `npm test` — Run the unit test suite via Vitest.
+- `npx vitest run --coverage` — Run unit tests with V8 code coverage report.
+- `npm run lint` — Type-check the project with TypeScript (`tsc --noEmit`).
+- `npm run build` — Build the production bundle into `dist/`.
+- `npm run preview` — Build and preview locally via Cloudflare Wrangler.
 
-## License
+## 📄 License
 
 This project is licensed under the Apache-2.0 License.

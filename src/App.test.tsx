@@ -242,16 +242,38 @@ describe('App Component', () => {
     fireEvent.mouseUp(canvas);
   });
 
-  it('handles mouse wheel zooming', () => {
+  it('handles mouse wheel zooming and decelerates zoom increments at deeper zoom levels', () => {
+    let currentTime = 1000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
+
     render(<App />);
     const container = screen.getByTestId('app-container');
     
     // Scroll down (zoom out)
     fireEvent.wheel(container, { deltaY: 100 });
     
-    const lastCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    const firstCallProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
     // Mandelbulb default zoom is 1.2. With deltaY = 100, zoom should decrease.
-    expect(lastCallProps.zoom).toBeLessThan(1.2);
+    expect(firstCallProps.zoom).toBeLessThan(1.2);
+
+    // Now zoom in repeatedly and verify relative zoom multiplier slows down at higher zoom
+    currentTime += 50;
+    fireEvent.wheel(container, { deltaY: -1000 });
+    const zoom1 = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0].zoom;
+
+    currentTime += 50;
+    fireEvent.wheel(container, { deltaY: -1000 });
+    const zoom2 = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0].zoom;
+
+    currentTime += 50;
+    fireEvent.wheel(container, { deltaY: -1000 });
+    const zoom3 = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0].zoom;
+
+    const ratio1 = zoom2 / zoom1;
+    const ratio2 = zoom3 / zoom2;
+    expect(ratio2).toBeLessThan(ratio1);
+
+    nowSpy.mockRestore();
   });
 
   it('handles slicer parameter changes', () => {
@@ -361,5 +383,86 @@ describe('App Component', () => {
     });
 
     expect(screenshotUtils.takeWallpaperScreenshot).toHaveBeenCalled();
+  });
+
+  it('handles 1-finger touch rotation, multi-touch end transition, right-click guard, and window resize quality unlock', async () => {
+    let currentTime = 2000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
+
+    render(<App />);
+    const canvas = screen.getByTestId('fractal-canvas');
+
+    // Right-click (button 2) should be ignored and not start interaction
+    fireEvent.mouseDown(canvas, { clientX: 50, clientY: 50, button: 2 });
+    let latestProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(latestProps.isInteracting).toBe(false);
+
+    // 1-finger touch start and move (orbit rotation)
+    fireEvent.touchStart(canvas, {
+      touches: [{ clientX: 100, clientY: 100 }]
+    });
+    currentTime += 25;
+    fireEvent.touchMove(canvas, {
+      touches: [{ clientX: 140, clientY: 120 }]
+    });
+
+    // Transition from 2 fingers to 1 finger on touchEnd
+    fireEvent.touchEnd(canvas, {
+      touches: [{ clientX: 140, clientY: 120 }]
+    });
+    latestProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(latestProps.isInteracting).toBe(true);
+
+    // Lift last finger
+    fireEvent.touchEnd(canvas, { touches: [] });
+    latestProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(latestProps.isInteracting).toBe(false);
+
+    // Drive handleFrameTime with frame deltas within deadband (~190ms vs 200ms target) until quality locks
+    currentTime += 1100;
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        currentTime += 250;
+        const cb = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0].onFrameTime;
+        cb(0.19, false);
+      });
+    }
+
+    latestProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(latestProps.isSettledQualityLocked).toBe(true);
+
+    // Calling onFrameTime while locked and not moving hits the fast early-return path
+    await act(async () => {
+      latestProps.onFrameTime(0.19, false);
+    });
+
+    // Resizing window by >5px unlocks settled quality
+    Object.defineProperty(window, 'innerWidth', { value: window.innerWidth + 100, configurable: true });
+    await act(async () => {
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    latestProps = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    expect(latestProps.isSettledQualityLocked).toBe(false);
+
+    nowSpy.mockRestore();
+  });
+
+  it('recovers cleanly when screenshot capture throws an error', async () => {
+    const screenshotUtils = await import('./utils/screenshot');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(screenshotUtils, 'takeWallpaperScreenshot').mockRejectedValueOnce(new Error('GPU OOM'));
+
+    render(<App />);
+    const screenshotButton = screen.getByTitle(/Download Ultra-HD Wallpaper/i);
+
+    await act(async () => {
+      fireEvent.click(screenshotButton);
+    });
+
+    expect(errorSpy).toHaveBeenCalledWith('Screenshot failed', expect.any(Error));
+    expect(screenshotButton).not.toBeDisabled();
+
+    errorSpy.mockRestore();
   });
 });

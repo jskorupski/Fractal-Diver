@@ -34,7 +34,7 @@ interface FractalMeshProps {
   isInteracting: boolean;
   interactionType: number;
   adaptiveIterations: number;        // Max iterations during interaction (targets 30fps)
-  adaptiveSettledIterations: number; // Max iterations when settled (targets 15fps)
+  adaptiveSettledIterations: number; // Max iterations when settled (targets 5fps progressive refinement)
   onFrameTime?: (delta: number, isMoving: boolean) => void;
   settleTimeRef: React.MutableRefObject<number>;
   isVisible: boolean;
@@ -58,9 +58,10 @@ interface FractalMeshProps {
 
 /**
  * FractalMesh Component.
- * This component is responsible for rendering the fractal using WebGPU and TSL.
- * It implements camera smoothing and handles the transition between interactive
- * and settled rendering states.
+ * Renders a fullscreen viewport quad shaded by the `renderFractal` TSL node material.
+ * Applies frame-rate independent exponential damping (`1 - exp(-12 * delta)`) to zoom,
+ * offset, and quaternion rotation (SLERP), and drives the on-demand render loop until
+ * camera motion settles and adaptive quality locks.
  */
 function FractalMesh({ 
   fractalType, 
@@ -251,7 +252,7 @@ interface FractalCanvasProps {
   isInteracting: boolean;
   interactionType: number;
   adaptiveIterations: number;        // Max iterations during interaction (targets 30fps)
-  adaptiveSettledIterations: number; // Max iterations when settled (targets 15fps)
+  adaptiveSettledIterations: number; // Max iterations when settled (targets 5fps progressive refinement)
   interactiveSteps: number;
   settledSteps: number;
   interactiveEpsilon: number;
@@ -274,7 +275,9 @@ interface FractalCanvasProps {
 
 /**
  * FractalCanvas Component.
- * Integrates WebGPURenderer with React Three Fiber using createRoot.
+ * Manages the lifecycle of the Three.js `WebGPURenderer` and React Three Fiber `createRoot`
+ * configured with `frameloop: 'demand'`. Automatically listens for WebGPU `device.lost` events
+ * and re-initializes the GPU pipeline on driver reset or sleep/wake recovery.
  */
 export default function FractalCanvas(props: FractalCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

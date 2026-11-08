@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import * as THREE from 'three';
 
 /**
@@ -15,7 +20,8 @@ export const FRACTAL_NAMES: Record<string, string> = {
 
 /**
  * Interface for fractal configuration.
- * Defines the initial view parameters and fractal-specific calculation parameters.
+ * Defines the initial camera state, adaptive performance bounds (iterations, raymarch steps,
+ * and surface epsilon thresholds), interaction sensitivities, and default shader parameters.
  */
 export interface FractalConfig {
   zoom: number;
@@ -52,28 +58,29 @@ export interface FractalConfig {
 }
 
 /**
- * Default view configurations for each fractal type.
- * These values are applied when a fractal is first selected or reset.
+ * Default view and adaptive quality configurations for each fractal type.
+ * Note: Mandelbulb ("0") iteration bounds are specifically calibrated to its 8^k running
+ * derivative growth rate so it remains within single-precision (f32) numerical limits.
  */
 export const FRACTAL_CONFIGS: Record<string, FractalConfig> = {
   "0": { // Mandelbulb
     zoom: 1.2, 
     offset: [0, 0, 0], 
     rotation: new THREE.Euler(0, 0, 0),
-    minInteractiveIterations: 12,
-    defaultInteractiveIterations: 16,
-    maxInteractiveIterations: 48,
-    minSettledIterations: 20,
-    defaultSettledIterations: 32,
-    maxSettledIterations: 120,
+    minInteractiveIterations: 6,
+    defaultInteractiveIterations: 8,
+    maxInteractiveIterations: 12,
+    minSettledIterations: 8,
+    defaultSettledIterations: 10,
+    maxSettledIterations: 14,
     interactiveSteps: 120,
     settledSteps: 800,
     minInteractiveEpsilon: 0.0001,
     defaultInteractiveEpsilon: 0.0005,
-    maxInteractiveEpsilon: 0.008,
+    maxInteractiveEpsilon: 0.004,
     minSettledEpsilon: 0.00005,
     defaultSettledEpsilon: 0.0001,
-    maxSettledEpsilon: 0.003,
+    maxSettledEpsilon: 0.002,
     panSensitivityMultiplier: 1.0,
     rotSensitivityMultiplier: 1.0,
     parameters: { param1: 8.0, param2: 0, param3: 0, baseColor: "#cba17c", accentColor: "#b37229" },
