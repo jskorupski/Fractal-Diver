@@ -51,13 +51,14 @@ Fractal Diver lets you fly through six classic three-dimensional fractals in rea
 | **Save Wallpaper** | Click **Camera** icon | Tap **Camera** icon |
 | **Reset View** | Click **Reset** | Tap **Reset** icon |
 
-## 🛠️ Tech Stack
+## 🛠️ Tech Stack & Architecture
 
 - **UI & State**: React 19 + TypeScript + Vite
 - **Rendering Engine**: Three.js (`WebGPURenderer` + TSL / WGSL Node Shaders) + React Three Fiber (`demand` frameloop)
 - **Styling**: Tailwind CSS v4 + Lucide Icons
 - **Testing**: Vitest + React Testing Library + V8 Coverage
 - **Deployment**: Cloudflare Workers / Static Assets (`wrangler`)
+- **Contributor Docs**: [Architecture Guide](docs/ARCHITECTURE.md) · [Agent Workspace Rules](AGENTS.md)
 
 ## 🚀 Getting Started
 
