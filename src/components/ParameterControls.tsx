@@ -5,7 +5,6 @@
 
 import React from 'react';
 import { Settings2 } from 'lucide-react';
-import { Button } from './ui/button';
 
 interface ParameterToggleProps {
   enabled: boolean;

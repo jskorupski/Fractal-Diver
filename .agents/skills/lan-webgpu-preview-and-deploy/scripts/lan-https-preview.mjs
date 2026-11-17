@@ -81,7 +81,7 @@ async function main() {
     configFile: false,
     root: repoRoot,
     plugins: [react(), tailwindcss()],
-    resolve: { alias: { '@': repoRoot } },
+    resolve: { alias: { '@': path.join(repoRoot, 'src') } },
   };
 
   const httpServer = await createServer({

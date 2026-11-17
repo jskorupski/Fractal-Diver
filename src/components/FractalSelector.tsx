@@ -6,7 +6,6 @@
 import React from 'react';
 import { RotateCcw } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Button } from './ui/button';
 import { FRACTAL_NAMES } from '../constants/fractals';
 
 interface FractalSelectorProps {
@@ -29,7 +28,11 @@ export const FractalSelector: React.FC<FractalSelectorProps> = ({
       {/* Fractal Selection Menu */}
       <Select 
         value={fractalType.toString()} 
-        onValueChange={(value) => onFractalChange(parseInt(value, 10))}
+        onValueChange={(value) => {
+          if (value !== null) {
+            onFractalChange(parseInt(value, 10));
+          }
+        }}
       >
         <SelectTrigger className="flex-1 sm:flex-none w-auto sm:w-[160px] bg-transparent text-cyan-400 border-none focus:ring-0 font-mono uppercase tracking-wider text-[10px] sm:text-[11px] h-11 hover:text-cyan-300 transition-colors px-3 sm:px-4">
           <SelectValue>

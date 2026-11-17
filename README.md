@@ -1,6 +1,6 @@
 # 🌀 Fractal Diver
 
-<img src="logo.svg" alt="Fractal Diver Logo" width="256" />
+<img src="public/logo.svg" alt="Fractal Diver Logo" width="256" />
 
 > **Dive into the infinite.** A real-time 3D fractal explorer powered by WebGPU and custom WGSL raymarching shaders.
 
