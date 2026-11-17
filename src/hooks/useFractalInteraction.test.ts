@@ -35,8 +35,6 @@ function setupHook(initialZoom = FRACTAL_CONFIGS['0'].zoom) {
     views = typeof updater === 'function' ? updater(views) : updater;
   });
   const updateCurrentView = vi.fn();
-  const setInteractiveSteps = vi.fn();
-  const setSettledSteps = vi.fn();
   const settleTimeRef = { current: 1.0 };
 
   const hook = renderHook(
@@ -50,8 +48,6 @@ function setupHook(initialZoom = FRACTAL_CONFIGS['0'].zoom) {
         setFractalViews,
         settleTimeRef,
         setIsSettledQualityLocked,
-        setInteractiveSteps,
-        setSettledSteps,
       }),
     { initialProps: { interacting: isInteracting } }
   );

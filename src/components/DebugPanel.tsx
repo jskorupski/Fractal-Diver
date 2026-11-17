@@ -18,6 +18,7 @@ interface DebugPanelProps {
   fractalType: number;
   renderCountRef: React.MutableRefObject<number>;
   fpsRef: React.MutableRefObject<number>;
+  dprRef?: React.MutableRefObject<number>;
   performanceKnobs: {
     interactiveSteps: number;
     settledSteps: number;
@@ -49,6 +50,7 @@ export default function DebugPanel({
   fractalType, 
   renderCountRef, 
   fpsRef,
+  dprRef,
   performanceKnobs,
   onUpdateKnobs
 }: DebugPanelProps) {
@@ -61,6 +63,7 @@ export default function DebugPanel({
     settledSteps: 0,
     settleProgress: 0,
     fps: 0,
+    dpr: 1,
     renderCount: 0,
   });
   
@@ -94,6 +97,7 @@ export default function DebugPanel({
       settledSteps: currentProps.performanceKnobs.settledSteps,
       settleProgress: settleTimeRef.current,
       fps: fpsRef.current,
+      dpr: dprRef?.current ?? 1,
       renderCount: renderCountRef.current,
     });
   };
@@ -124,6 +128,7 @@ export default function DebugPanel({
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
           <span>Fractal:</span> <span className="text-right">{fractalType}</span>
           <span>FPS:</span> <span className="text-right">{values.fps} {spinner}</span>
+          <span>DPR:</span> <span className="text-right">{values.dpr.toFixed(2)}x</span>
           <span>Settle:</span> <span className="text-right">{(values.settleProgress * 100).toFixed(0)}%</span>
         </div>
 

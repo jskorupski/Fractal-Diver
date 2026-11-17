@@ -26,9 +26,10 @@ Fractal Diver lets you fly through six classic three-dimensional fractals in rea
   - **4-Tap Tetrahedral Normals**: Evaluates surface gradients in fractal space using Inigo Quilez's 4-sample tetrahedral central-difference stencil.
   - **Hybrid Ambient Occlusion**: Blends multi-sample fractal-space distance occlusion with crevasse step-count shading.
   - **Camera-Relative Studio Lighting & ACES Tonemapping**: Two-point key/fill lighting attached to the camera rig, Blinn-Phong ridge highlights, Fresnel rim glow, orbit-trap color palettes, and ACES filmic tonemapping.
-- **Closed-Loop Adaptive Performance**:
-  - Uses an asymmetric Exponential Moving Average (EMA) frame-time controller that reacts rapidly to frame drops.
-  - Targets **30 FPS** during camera or slider interaction—biasing load-shedding toward raymarching epsilon so 3D fractal geometry stays intact even at deep zoom—and smoothly transitions into high-precision progressive refinement when settled, locking the frame loop once converged to save power.
+- **Closed-Loop Adaptive Performance & Pixel-Budget DPR**:
+  - Uses an asymmetric Exponential Moving Average (EMA) frame-time controller paired with viewport-aware device pixel ratio (DPR) scaling (up to **1.5×** interactively and **2.25×** when settled on high-DPI phones/tablets in `0.25×` quantized steps, while bounding large desktop viewports to avoid fragment overload).
+  - Targets **30 FPS** during interaction via a strict **4-tier non-destructive cascade** (**Dynamic Resolution / DPR → grazing-ray step cap → pixel-bounded surface epsilon → emergency-only iteration floor**), keeping fractal iterations locked to zoom-LOD during normal motion so 3D topology never pops.
+  - Seamlessly inherits the interactive baseline on release, progressively refines surface detail at **5 FPS**, and locks the on-demand render loop at **0% GPU** once converged.
 - **Deep-Zoom Camera Physics & No-Clip Interior Diving**:
   - **Near-Window No-Clip Diving**: Close-up geometry right in front of the camera lens disappears through a near-clipping window while signed fractal interiors are raymarched as double-sided hollow shells with secant zero-crossing refinement—letting you dive seamlessly through outer walls into interior chambers without camera pushback or GPU stalls.
   - Frame-rate independent quaternion SLERP rotation and damped translation.
@@ -64,7 +65,7 @@ Fractal Diver lets you fly through six classic three-dimensional fractals in rea
 
 ### Prerequisites
 
-- **Node.js** 20+
+- **Node.js** 22+
 - A browser with **WebGPU** support (Chrome 113+, Edge 113+, Firefox Nightly, or Safari 18+).
 
 ### Installation & Local Development

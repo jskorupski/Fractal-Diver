@@ -384,8 +384,10 @@ describe('App Component', () => {
     
     // Get the absolute latest call
     const finalCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
-    // Interactive epsilon should increase (lower precision)
-    expect(finalCall.interactiveEpsilon).toBeGreaterThan(0.00001);
+    // 4-tier cascade sheds interactiveResolutionScale, interactiveSteps, and interactiveEpsilon
+    expect(finalCall.interactiveResolutionScale).toBeLessThan(1);
+    expect(finalCall.interactiveSteps).toBeLessThan(120);
+    expect(finalCall.interactiveEpsilon).toBeGreaterThan(0.0005);
     
     vi.restoreAllMocks();
   });
@@ -486,5 +488,20 @@ describe('App Component', () => {
     expect(screenshotButton).not.toBeDisabled();
 
     errorSpy.mockRestore();
+  });
+
+  it('wires onDprChange callback and SlicerPanel collapse toggle', () => {
+    render(<App />);
+
+    const latestCall = mockFractalCanvas.mock.calls[mockFractalCanvas.mock.calls.length - 1][0];
+    act(() => {
+      latestCall.onDprChange(1.5);
+    });
+
+    fireEvent.click(screen.getByTestId('slicer-toggle'));
+    expect(screen.getByRole('slider', { name: /Slicer Offset/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Slicer Controls'));
+    expect(screen.queryByRole('slider', { name: /Slicer Offset/i })).not.toBeInTheDocument();
   });
 });

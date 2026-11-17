@@ -19,6 +19,27 @@ import {
 } from 'three/tsl';
 
 import { renderFractal } from '../shaders/fractalEngine';
+import {
+  INTERACTIVE_PIXEL_BUDGET,
+  SETTLED_PIXEL_BUDGET,
+  MAX_INTERACTIVE_DPR,
+  MAX_SETTLED_DPR,
+  LARGE_VIEWPORT_PIXEL_THRESHOLD,
+  MIN_LARGE_VIEWPORT_INTERACTIVE_DPR,
+  getDprBounds,
+  calculateTargetDpr
+} from '../utils/dpr';
+
+export {
+  INTERACTIVE_PIXEL_BUDGET,
+  SETTLED_PIXEL_BUDGET,
+  MAX_INTERACTIVE_DPR,
+  MAX_SETTLED_DPR,
+  LARGE_VIEWPORT_PIXEL_THRESHOLD,
+  MIN_LARGE_VIEWPORT_INTERACTIVE_DPR,
+  getDprBounds,
+  calculateTargetDpr
+};
 
 // Extend R3F with standard THREE objects
 extend({ Mesh, PlaneGeometry });
@@ -33,6 +54,7 @@ interface FractalMeshProps {
   rotation: THREE.Quaternion;
   isInteracting: boolean;
   interactionType: number;
+  dpr?: number;
   adaptiveIterations: number;        // Max iterations during interaction (targets 30fps)
   adaptiveSettledIterations: number; // Max iterations when settled (targets 5fps progressive refinement)
   onFrameTime?: (delta: number, isMoving: boolean) => void;
@@ -70,6 +92,7 @@ function FractalMesh({
   rotation, 
   isInteracting,
   interactionType,
+  dpr = 1,
   adaptiveIterations,
   adaptiveSettledIterations,
   onFrameTime,
@@ -96,8 +119,10 @@ function FractalMesh({
   // Target rotation as quaternion
   const targetRotation = useMemo(() => rotation.clone(), [rotation]);
 
+  const initialDpr = viewport.dpr || dpr || 1;
+
   const uniforms = useMemo(() => ({
-    uniformResolution: uniform(new THREE.Vector2(size.width, size.height)),
+    uniformResolution: uniform(new THREE.Vector2(size.width * initialDpr, size.height * initialDpr)),
     uniformType: uniform(Math.floor(fractalType)),
     uniformZoom: uniform(zoom),
     uniformOffset: uniform(offset.clone()),
@@ -127,9 +152,10 @@ function FractalMesh({
   }, [fractalType, zoom, offset, rotation, isInteracting, interactionType, adaptiveIterations, adaptiveSettledIterations, interactiveSteps, settledSteps, interactiveEpsilon, settledEpsilon, slicerEnabled, slicerOffset, slicerAxis, isVisible, invalidate, parameters]);
 
   useEffect(() => {
-    uniforms.uniformResolution.value.set(size.width, size.height);
+    const activeDpr = viewport.dpr || dpr || 1;
+    uniforms.uniformResolution.value.set(size.width * activeDpr, size.height * activeDpr);
     invalidate();
-  }, [size, uniforms, invalidate]);
+  }, [size, viewport.dpr, dpr, uniforms, invalidate]);
 
   useFrame((_state, delta) => {
     // If we are still smoothing, keep invalidating
@@ -257,6 +283,9 @@ interface FractalCanvasProps {
   settledSteps: number;
   interactiveEpsilon: number;
   settledEpsilon: number;
+  interactiveResolutionScale?: number;
+  settledResolutionScale?: number;
+  onDprChange?: (dpr: number) => void;
   isSettledQualityLocked?: boolean;
   onFrameTime?: (delta: number, isMoving: boolean) => void;
   settleTimeRef: React.MutableRefObject<number>;
@@ -289,17 +318,50 @@ export default function FractalCanvas(props: FractalCanvasProps) {
   const [root, setRoot] = useState<any>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [statusMessage, setStatusMessage] = useState("INITIALIZING WEBGPU...");
+  const [isDprSettled, setIsDprSettled] = useState(() => !props.isInteracting);
+  const isDprSettledRef = useRef(isDprSettled);
+  isDprSettledRef.current = isDprSettled;
+  const [appliedDpr, setAppliedDpr] = useState(1);
+  const lastConfiguredRef = useRef<{ width: number; height: number; dpr: number } | null>(null);
+  const activeResolutionScale = isDprSettled
+    ? (props.settledResolutionScale ?? 1)
+    : (props.interactiveResolutionScale ?? 1);
+  const resolutionScaleRef = useRef(activeResolutionScale);
+  resolutionScaleRef.current = activeResolutionScale;
+  const onDprChangeRef = useRef(props.onDprChange);
+  onDprChangeRef.current = props.onDprChange;
+
+  // Drop to interactive DPR immediately on input; step up to settled DPR 150ms after input ends
+  // so momentum camera damping finishes at high FPS without swapchain thrashing.
+  useEffect(() => {
+    if (props.isInteracting) {
+      setIsDprSettled(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setIsDprSettled(true);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [props.isInteracting]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
     
+    lastConfiguredRef.current = null;
     const canvas = canvasRef.current;
     const container = containerRef.current;
     const initialWidth = container?.clientWidth || canvas.clientWidth || window.innerWidth || 1;
     const initialHeight = container?.clientHeight || canvas.clientHeight || window.innerHeight || 1;
+    const initialDpr = calculateTargetDpr(
+      initialWidth,
+      initialHeight,
+      window.devicePixelRatio,
+      isDprSettledRef.current,
+      resolutionScaleRef.current
+    );
     
     const r = new WebGPURenderer({ canvas, antialias: false });
-    r.setPixelRatio(1.0);
+    r.setPixelRatio(initialDpr);
     r.setSize(initialWidth, initialHeight, false);
     rendererRef.current = r;
     
@@ -330,16 +392,29 @@ export default function FractalCanvas(props: FractalCanvasProps) {
       
       const width = container?.clientWidth || canvas.clientWidth || window.innerWidth || 1;
       const height = container?.clientHeight || canvas.clientHeight || window.innerHeight || 1;
+      const dpr = calculateTargetDpr(
+        width,
+        height,
+        window.devicePixelRatio,
+        isDprSettledRef.current,
+        resolutionScaleRef.current
+      );
+      r.setPixelRatio(dpr);
+      r.setSize(width, height, true);
+
       const r3fRoot = createRoot(canvas);
       r3fRoot.configure({
         gl: r,
         events,
         frameloop: 'demand',
-        dpr: 1,
+        dpr,
         camera: CAMERA_CONFIG,
         size: { width, height, top: 0, left: 0 }
       });
       
+      lastConfiguredRef.current = { width, height, dpr };
+      setAppliedDpr(dpr);
+      onDprChangeRef.current?.(dpr);
       rootRef.current = r3fRoot;
       setRoot(r3fRoot);
     }).catch(err => {
@@ -365,18 +440,32 @@ export default function FractalCanvas(props: FractalCanvasProps) {
     };
   }, [retryCount]);
 
-  // Handle window and container resizing
+  // Handle window/container resizing and progressive interactive <-> settled DPR switching.
   // Note: R3F's internal setSize writes inline `style="width: ...px; height: ...px"` onto <canvas>,
   // so we must measure `containerRef.current` (the responsive wrapper div) rather than `canvas.clientWidth`.
   useEffect(() => {
     if (root && canvasRef.current) {
       const canvas = canvasRef.current;
       const container = containerRef.current;
-      const handleResize = () => {
+      const syncSizeAndDpr = () => {
         const width = container?.clientWidth || window.innerWidth || canvas.clientWidth || 1;
         const height = container?.clientHeight || window.innerHeight || canvas.clientHeight || 1;
+        const nextDpr = calculateTargetDpr(
+          width,
+          height,
+          window.devicePixelRatio,
+          isDprSettled,
+          activeResolutionScale
+        );
+
+        const prev = lastConfiguredRef.current;
+        if (prev && prev.width === width && prev.height === height && prev.dpr === nextDpr) {
+          return;
+        }
+        lastConfiguredRef.current = { width, height, dpr: nextDpr };
         
         if (rendererRef.current) {
+          rendererRef.current.setPixelRatio(nextDpr);
           rendererRef.current.setSize(width, height, true);
         }
 
@@ -384,34 +473,38 @@ export default function FractalCanvas(props: FractalCanvasProps) {
           gl: rendererRef.current,
           events,
           frameloop: 'demand',
-          dpr: 1,
+          dpr: nextDpr,
           camera: CAMERA_CONFIG,
           size: { width, height, top: 0, left: 0 }
         });
+
+        setAppliedDpr(nextDpr);
+        onDprChangeRef.current?.(nextDpr);
       };
 
-      window.addEventListener('resize', handleResize);
+      syncSizeAndDpr();
+      window.addEventListener('resize', syncSizeAndDpr);
       let resizeObserver: ResizeObserver | null = null;
       if (typeof ResizeObserver !== 'undefined' && container) {
-        resizeObserver = new ResizeObserver(handleResize);
+        resizeObserver = new ResizeObserver(syncSizeAndDpr);
         resizeObserver.observe(container);
       }
 
       return () => {
-        window.removeEventListener('resize', handleResize);
+        window.removeEventListener('resize', syncSizeAndDpr);
         if (resizeObserver) resizeObserver.disconnect();
       };
     }
-  }, [root]);
+  }, [root, isDprSettled, activeResolutionScale]);
 
   // Render the scene
   useEffect(() => {
     if (root) {
       root.render(
-        <FractalMesh {...props} />
+        <FractalMesh {...props} dpr={appliedDpr} />
       );
     }
-  }, [root, props]);
+  }, [root, props, appliedDpr]);
 
   return (
     <div ref={containerRef} className="w-full h-full bg-black relative">

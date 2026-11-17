@@ -22,7 +22,7 @@ For exact formulas, thresholds, and root-cause analyses of past shader fixes, re
    - Wire `else if (fractalType == N)` inside `getFractalData`. Remember `params` packs `(qualityOffset, param1, param2, param3)` -> `params.y` is `param1`, `params.z` is `param2`, `params.w` is `param3`.
 2. **[`src/constants/fractals.ts`](../../../src/constants/fractals.ts)**:
    - Add `"N"` to `FRACTAL_NAMES` and `FRACTAL_CONFIGS`.
-   - Calibrate `zoom`, `offset`, `rotation`, `min/default/max` interactive & settled iterations/epsilons, `interactiveSteps` / `settledSteps`, `panSensitivityMultiplier` / `rotSensitivityMultiplier`, `parameters`, and `slicer`.
+   - Calibrate `zoom`, `offset`, `rotation`, `min/default/max` interactive & settled iterations/epsilons (keeping `maxInteractiveEpsilon` pixel-bounded at `0.0015–0.002`), `minInteractiveSteps` / `interactiveSteps` / `settledSteps`, `panSensitivityMultiplier` / `rotSensitivityMultiplier`, `parameters`, and `slicer`.
 3. **[`src/components/ParameterControls.tsx`](../../../src/components/ParameterControls.tsx)**:
    - Update dynamic slider labels (`param1` Power/Scale, `param2`, `param3`), `min`/`max`/`step` bounds, and visibility guards for `fractalType === N`.
 4. **[`src/App.tsx`](../../../src/App.tsx)**:
@@ -75,4 +75,4 @@ After editing [`src/shaders/fractalEngine.ts`](../../../src/shaders/fractalEngin
    ```bash
    npm run lint && npm test
    ```
-Confirm `probe-raymarch.mjs` exits `0` with no `NaN`/`Infinity`/unexpected blackouts and all 67+ Vitest specs pass.
+Confirm `probe-raymarch.mjs` exits `0` with no `NaN`/`Infinity`/unexpected blackouts and all 80+ Vitest specs pass.

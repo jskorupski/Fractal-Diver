@@ -15,6 +15,7 @@ import { ParameterToggle, ParameterPanel } from './components/ParameterControls'
 import { FRACTAL_CONFIGS } from './constants/fractals';
 import { usePerformanceAdaptation } from './hooks/usePerformanceAdaptation';
 import { useFractalInteraction } from './hooks/useFractalInteraction';
+import { getDprBounds } from './utils/dpr';
 import { takeWallpaperScreenshot } from './utils/screenshot';
 
 /**
@@ -76,16 +77,17 @@ export default function App() {
   const [interactionType, setInteractionType] = useState<number>(0); // 0: none, 1: pan/rotate, 2: zoom
   const [isVisible, setIsVisible] = useState<boolean>(true);
   const [isSettledQualityLocked, setIsSettledQualityLocked] = useState<boolean>(false);
-
-  // Performance Knobs (Dynamic Overrides)
-  const [interactiveSteps, setInteractiveSteps] = useState<number>(FRACTAL_CONFIGS["0"].interactiveSteps);
-  const [settledSteps, setSettledSteps] = useState<number>(FRACTAL_CONFIGS["0"].settledSteps);
+  const [viewportSize, setViewportSize] = useState(() => ({
+    width: window.innerWidth || 1,
+    height: window.innerHeight || 1
+  }));
   
   // Refs for tracking state across frames without triggering re-renders
   const containerRef = useRef<HTMLDivElement>(null);
   const settleTimeRef = useRef<number>(0);
   const renderCountRef = useRef<number>(0);
   const fpsRef = useRef<number>(0);
+  const dprRef = useRef<number>(1);
   const lastFpsTimeRef = useRef<number>(0);
   const framesSinceLastFpsRef = useRef<number>(0);
 
@@ -94,14 +96,26 @@ export default function App() {
   // and progressively refine once the user releases the slider.
   const activeInteracting = isInteracting || isDragging;
 
+  const interactiveDprBounds = getDprBounds(viewportSize.width, viewportSize.height, window.devicePixelRatio || 1, false);
+  const settledDprBounds = getDprBounds(viewportSize.width, viewportSize.height, window.devicePixelRatio || 1, true);
+  const minInteractiveScale = interactiveDprBounds.minDpr / interactiveDprBounds.maxDpr;
+  const minSettledScale = settledDprBounds.minDpr / settledDprBounds.maxDpr;
+
   const {
+    interactiveResolutionScale,
+    settledResolutionScale,
+    interactiveSteps,
+    settledSteps,
     interactiveEpsilon,
     settledEpsilon,
     interactiveIterations,
     settledIterations,
     onFrameTime,
     overrideKnobs
-  } = usePerformanceAdaptation(fractalType, activeInteracting);
+  } = usePerformanceAdaptation(fractalType, activeInteracting, {
+    minInteractiveScale,
+    minSettledScale
+  });
 
   /**
    * Updates the current fractal view state with a partial update.
@@ -154,9 +168,7 @@ export default function App() {
     updateCurrentView,
     setFractalViews,
     settleTimeRef,
-    setIsSettledQualityLocked,
-    setInteractiveSteps,
-    setSettledSteps
+    setIsSettledQualityLocked
   });
 
   /**
@@ -177,15 +189,20 @@ export default function App() {
 
   // --- Lifecycle Hooks ---
 
-  // Sync performance knobs when fractal type changes
+  // Reset settled quality lock when fractal type changes
   useEffect(() => {
-    const config = FRACTAL_CONFIGS[fractalType.toString()];
-    setInteractiveSteps(config.interactiveSteps);
-    setSettledSteps(config.settledSteps);
     setIsSettledQualityLocked(false);
   }, [fractalType]);
 
-  // Handle window resize to reset settled quality lock
+  // Ensure any pointer/slider interaction unlocks settled quality and resets settle progression
+  useEffect(() => {
+    if (activeInteracting) {
+      setIsSettledQualityLocked(false);
+      settleTimeRef.current = 0;
+    }
+  }, [activeInteracting]);
+
+  // Handle window resize to reset settled quality lock and update viewport bounds
   useEffect(() => {
     let lastWidth = window.innerWidth;
     let lastHeight = window.innerHeight;
@@ -194,6 +211,7 @@ export default function App() {
       const newHeight = window.innerHeight;
       if (Math.abs(newWidth - lastWidth) > 5 || Math.abs(newHeight - lastHeight) > 5) {
         setIsSettledQualityLocked(false);
+        setViewportSize({ width: newWidth || 1, height: newHeight || 1 });
         lastWidth = newWidth;
         lastHeight = newHeight;
       }
@@ -376,6 +394,7 @@ export default function App() {
           fractalType={fractalType}
           renderCountRef={renderCountRef}
           fpsRef={fpsRef}
+          dprRef={dprRef}
           performanceKnobs={{
             interactiveSteps,
             settledSteps,
@@ -384,12 +403,14 @@ export default function App() {
           }}
           onUpdateKnobs={(knobs) => {
             overrideKnobs(knobs);
-            if (knobs.settledIterations !== undefined || knobs.settledEpsilon !== undefined) {
+            if (
+              knobs.settledIterations !== undefined ||
+              knobs.settledEpsilon !== undefined ||
+              knobs.settledSteps !== undefined
+            ) {
               // Lock settled quality so the automatic controller does not immediately overwrite manual debug overrides
               setIsSettledQualityLocked(true);
             }
-            if (knobs.interactiveSteps !== undefined) setInteractiveSteps(knobs.interactiveSteps);
-            if (knobs.settledSteps !== undefined) setSettledSteps(knobs.settledSteps);
           }}
         />
       )}
@@ -406,6 +427,9 @@ export default function App() {
         settledSteps={settledSteps}
         interactiveEpsilon={finalInteractiveEpsilon}
         settledEpsilon={settledEpsilon}
+        interactiveResolutionScale={interactiveResolutionScale}
+        settledResolutionScale={settledResolutionScale}
+        onDprChange={(dpr) => { dprRef.current = dpr; }}
         onFrameTime={handleFrameTime}
         settleTimeRef={settleTimeRef}
         isVisible={isVisible}

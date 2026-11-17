@@ -31,8 +31,9 @@ describe('DebugPanel', () => {
     expect(screen.queryByText('Debug')).not.toBeInTheDocument();
   });
 
-  it('renders panel and updates values', () => {
-    render(<DebugPanel {...defaultProps} />);
+  it('renders panel and updates values including DPR metric', () => {
+    const dprRef = { current: 1.5 };
+    render(<DebugPanel {...defaultProps} dprRef={dprRef} />);
     
     expect(screen.getByText('Debug')).toBeInTheDocument();
     
@@ -41,6 +42,13 @@ describe('DebugPanel', () => {
     });
 
     expect(screen.getByText('60 |')).toBeInTheDocument();
+    expect(screen.getByText('1.50x')).toBeInTheDocument();
+
+    act(() => {
+      dprRef.current = 2.25;
+      vi.advanceTimersByTime(500);
+    });
+    expect(screen.getByText('2.25x')).toBeInTheDocument();
   });
 
   it('handles input changes', () => {

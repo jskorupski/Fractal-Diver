@@ -1,6 +1,6 @@
 import { render, screen, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import FractalCanvas from './FractalCanvas';
+import FractalCanvas, { calculateTargetDpr, getDprBounds } from './FractalCanvas';
 import * as THREE from 'three';
 
 // Mock WebGPURenderer
@@ -286,5 +286,208 @@ describe('FractalCanvas Component', () => {
     unmount();
     consoleErrorSpy.mockRestore();
     vi.useRealTimers();
+  });
+
+  it('computes pixel-budget DPR across mobile, tablet, Retina desktop, and 1x displays', () => {
+    // Samsung S24 Ultra CSS viewport (412x915 @ 3.5x native DPR)
+    expect(calculateTargetDpr(412, 915, 3.5, false)).toBe(1.5);
+    expect(calculateTargetDpr(412, 915, 3.5, true)).toBe(2.25);
+
+    // Tablet portrait (820x1180 @ 2.0x native DPR)
+    expect(calculateTargetDpr(820, 1180, 2.0, false)).toBe(1);
+    expect(calculateTargetDpr(820, 1180, 2.0, true)).toBe(1.5);
+
+    // Large 16-inch Retina MacBook Pro window (1728x1117 @ 2.0x) stays at 1x to protect framerate
+    expect(calculateTargetDpr(1728, 1117, 2.0, false)).toBe(1);
+    expect(calculateTargetDpr(1728, 1117, 2.0, true)).toBe(1);
+
+    // Standard 1x displays and invalid/zero DPR inputs clamp cleanly to 1
+    expect(calculateTargetDpr(1920, 1080, 1.0, true)).toBe(1);
+    expect(calculateTargetDpr(412, 915, 0, true)).toBe(1);
+    expect(calculateTargetDpr(412, 915, Number.NaN, true)).toBe(1);
+  });
+
+  it('progressively switches DPR between interactive (1.5x) and settled (2.25x) on high-DPI mobile viewports', async () => {
+    vi.useFakeTimers();
+    const origDpr = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    const origWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const origHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+
+    Object.defineProperty(window, 'devicePixelRatio', { value: 3.5, configurable: true });
+    Object.defineProperty(window, 'innerWidth', { value: 412, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 915, configurable: true });
+
+    try {
+      const { WebGPURenderer } = await import('three/webgpu');
+      const { createRoot } = await import('@react-three/fiber');
+
+      const mockSetPixelRatio = vi.fn();
+      const mockSetSize = vi.fn();
+      (WebGPURenderer as any).mockImplementation(function() {
+        return {
+          init: () => Promise.resolve(),
+          setPixelRatio: mockSetPixelRatio,
+          setSize: mockSetSize,
+          dispose: vi.fn(),
+          backend: { device: { lost: new Promise(() => {}) } }
+        };
+      });
+
+      const mockConfigure = vi.fn();
+      const mockRender = vi.fn();
+      (createRoot as any).mockImplementation(() => ({
+        configure: mockConfigure,
+        render: mockRender,
+        unmount: vi.fn()
+      }));
+
+      const { rerender, unmount } = render(<FractalCanvas {...defaultProps} isInteracting={false} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mockConfigure).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dpr: 2.25,
+          size: { width: 412, height: 915, top: 0, left: 0 }
+        })
+      );
+
+      // Start interacting: drops DPR to interactive 1.5x immediately
+      rerender(<FractalCanvas {...defaultProps} isInteracting={true} />);
+      expect(mockConfigure).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          dpr: 1.5
+        })
+      );
+      expect(mockRender.mock.calls[mockRender.mock.calls.length - 1][0].props.dpr).toBe(1.5);
+
+      // End interacting: stays at 1.5x for 150ms debounce while camera momentum settles
+      rerender(<FractalCanvas {...defaultProps} isInteracting={false} />);
+      act(() => {
+        vi.advanceTimersByTime(50);
+      });
+      expect(mockConfigure).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          dpr: 1.5
+        })
+      );
+
+      // After 150ms idle settle, steps cleanly up to 2.25x
+      await act(async () => {
+        vi.advanceTimersByTime(110);
+      });
+      expect(mockConfigure).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          dpr: 2.25
+        })
+      );
+      expect(mockRender.mock.calls[mockRender.mock.calls.length - 1][0].props.dpr).toBe(2.25);
+
+      unmount();
+    } finally {
+      if (origDpr) Object.defineProperty(window, 'devicePixelRatio', origDpr);
+      else delete (window as any).devicePixelRatio;
+      if (origWidth) Object.defineProperty(window, 'innerWidth', origWidth);
+      if (origHeight) Object.defineProperty(window, 'innerHeight', origHeight);
+      vi.useRealTimers();
+    }
+  });
+
+  it('computes getDprBounds and resolutionScale DPR steps across mobile and Retina desktops', () => {
+    // S24 Ultra (412x915 @ 3.5x): interactive [1.0, 1.5], settled [1.0, 2.25]
+    expect(getDprBounds(412, 915, 3.5, false)).toEqual({ minDpr: 1, maxDpr: 1.5 });
+    expect(getDprBounds(412, 915, 3.5, true)).toEqual({ minDpr: 1, maxDpr: 2.25 });
+    expect(calculateTargetDpr(412, 915, 3.5, false, 1.0)).toBe(1.5);
+    expect(calculateTargetDpr(412, 915, 3.5, false, 0.85)).toBe(1.25);
+    expect(calculateTargetDpr(412, 915, 3.5, false, 0.67)).toBe(1.0);
+    expect(calculateTargetDpr(412, 915, 3.5, false, 0.25)).toBe(1.0);
+
+    // Retina desktop (1728x1117 @ 2.0x): interactive DRS floor 0.75x, settled floor 1.0x
+    expect(getDprBounds(1728, 1117, 2.0, false)).toEqual({ minDpr: 0.75, maxDpr: 1 });
+    expect(getDprBounds(1728, 1117, 2.0, true)).toEqual({ minDpr: 1, maxDpr: 1 });
+    expect(calculateTargetDpr(1728, 1117, 2.0, false, 1.0)).toBe(1.0);
+    expect(calculateTargetDpr(1728, 1117, 2.0, false, 0.75)).toBe(0.75);
+    expect(calculateTargetDpr(1728, 1117, 2.0, false, 0.4)).toBe(0.75);
+    expect(calculateTargetDpr(1728, 1117, 2.0, true, 0.5)).toBe(1.0);
+  });
+
+  it('reconfigures DPR when interactiveResolutionScale drops and fires onDprChange', async () => {
+    const origDpr = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    const origWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const origHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+
+    Object.defineProperty(window, 'devicePixelRatio', { value: 3.5, configurable: true });
+    Object.defineProperty(window, 'innerWidth', { value: 412, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 915, configurable: true });
+
+    try {
+      const { WebGPURenderer } = await import('three/webgpu');
+      const { createRoot } = await import('@react-three/fiber');
+
+      (WebGPURenderer as any).mockImplementation(function() {
+        return {
+          init: () => Promise.resolve(),
+          setPixelRatio: vi.fn(),
+          setSize: vi.fn(),
+          dispose: vi.fn(),
+          backend: { device: { lost: new Promise(() => {}) } }
+        };
+      });
+
+      const mockConfigure = vi.fn();
+      const mockRender = vi.fn();
+      (createRoot as any).mockImplementation(() => ({
+        configure: mockConfigure,
+        render: mockRender,
+        unmount: vi.fn()
+      }));
+
+      const onDprChange = vi.fn();
+      const { rerender, unmount } = render(
+        <FractalCanvas
+          {...defaultProps}
+          isInteracting={true}
+          interactiveResolutionScale={1.0}
+          onDprChange={onDprChange}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mockConfigure).toHaveBeenLastCalledWith(expect.objectContaining({ dpr: 1.5 }));
+      expect(onDprChange).toHaveBeenLastCalledWith(1.5);
+
+      rerender(
+        <FractalCanvas
+          {...defaultProps}
+          isInteracting={true}
+          interactiveResolutionScale={0.85}
+          onDprChange={onDprChange}
+        />
+      );
+      expect(mockConfigure).toHaveBeenLastCalledWith(expect.objectContaining({ dpr: 1.25 }));
+      expect(onDprChange).toHaveBeenLastCalledWith(1.25);
+
+      rerender(
+        <FractalCanvas
+          {...defaultProps}
+          isInteracting={true}
+          interactiveResolutionScale={0.67}
+          onDprChange={onDprChange}
+        />
+      );
+      expect(mockConfigure).toHaveBeenLastCalledWith(expect.objectContaining({ dpr: 1.0 }));
+      expect(onDprChange).toHaveBeenLastCalledWith(1.0);
+
+      unmount();
+    } finally {
+      if (origDpr) Object.defineProperty(window, 'devicePixelRatio', origDpr);
+      else delete (window as any).devicePixelRatio;
+      if (origWidth) Object.defineProperty(window, 'innerWidth', origWidth);
+      if (origHeight) Object.defineProperty(window, 'innerHeight', origHeight);
+    }
   });
 });

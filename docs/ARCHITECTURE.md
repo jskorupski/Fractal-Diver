@@ -8,12 +8,12 @@ This document details the runtime data flow, coordinate transforms, WGSL raymarc
 
 ```mermaid
 flowchart TD
-  UI["User Input & HUD Controls\n(useFractalInteraction, ParameterPanel,\nSlicerPanel, FractalSelector, DebugPanel)"] --> App["src/App.tsx\nPer-fractal view state, zoom-LOD iter boost,\nsettleTimeRef, isSettledQualityLocked"]
-  App -->|camera, params, slicer, adaptive quality| Canvas["src/components/FractalCanvas.tsx\nWebGPURenderer + R3F demand loop\ndpr=1, ResizeObserver, exp damping"]
+  UI["User Input & HUD Controls\n(useFractalInteraction, ParameterPanel,\nSlicerPanel, FractalSelector, DebugPanel)"] --> App["src/App.tsx\nPer-fractal view state, zoom-LOD iter boost,\ngetDprBounds, settleTimeRef, quality lock"]
+  App -->|camera, params, slicer, resScale, steps, eps, iters| Canvas["src/components/FractalCanvas.tsx\nWebGPURenderer + R3F demand loop\ncalculateTargetDpr (src/utils/dpr.ts), ResizeObserver"]
   Canvas -->|uniforms + full-screen quad| Shader["src/shaders/fractalEngine.ts\nTSL wgslFn -> WGSL raymarcher\n6 DEs + normals + AO + ACES"]
   Canvas -->|"onFrameTime(min(delta, 1.0), isStillSmoothing)"| Pulse["App.tsx handleFrameTime()\nFPS meter + settle progression\nquality lock"]
-  Pulse -->|EMA error & deadband| Adapt["src/hooks/usePerformanceAdaptation.ts\n30 FPS interactive / 5 FPS settled\n15% deadband, 15 Hz throttle"]
-  Adapt -->|interactive/settled eps & iters| App
+  Pulse -->|EMA error & deadband| Adapt["src/hooks/usePerformanceAdaptation.ts\n30 FPS interactive / 5 FPS settled\n4-tier cascade (DPR -> steps -> eps -> iters)"]
+  Adapt -->|resScale, steps, eps & iters| App
   App -->|snapshot on click| Export["src/utils/screenshot.ts\nOffscreen WebGPURenderer <= 3840px\nSRGBColorSpace + ACESFilmicToneMapping"]
 ```
 
@@ -52,33 +52,39 @@ flowchart TD
 
 `uniformParameters` packs `(qualityOffset, param1, param2, param3)` into `(x, y, z, w)`:
 
-| ID | Fractal | WGSL Function | DE Type | `param1` (`y`) | `param2` (`z`) | `param3` (`w`) | Default Zoom | Slicer Default | Iteration Bounds (Int / Set) |
-| :-: | :--- | :--- | :--- | :--- | :--- | :--- | :-: | :-: | :--- |
-| `0` | **Mandelbulb** | `getMandelbulbData` | Triplex analytic (signed) | Power (`8.0`) | — | — | `1.2` | Off | `6–12` / `8–14` (`+6` zoom cap) |
-| `1` | **Menger Sponge** | `getMengerSpongeData` | Recursive box fold (signed) | Scale (`3.48`) | — | — | `1.0` | Off | `4–16` / `8–48` (`+16` zoom cap) |
-| `2` | **Julia Set** | `getJuliaData` | 3D hypercomplex quadratic (signed) | — | C Real (`-0.8`) | C Imag (`0.156`) | `1.2` | On (Z=0) | `24–80` / `24–150` (`+16` zoom cap) |
-| `3` | **Sierpinski** | `getSierpinskiData` | Tetrahedral KIFS (unsigned) | Scale (`1.75`) | — | — | `1.0` | Off | `8–30` / `15–48` (`+16` zoom cap) |
-| `4` | **Mandelbox** | `getMandelboxData` | Box + sphere fold (unsigned) | Scale (`2.0`) | Min Radius (`0.135`) | Fixed Radius (`1.0`) | `0.15` | Off | `16–48` / `24–120` (`+16` zoom cap) |
-| `5` | **Apollonian** | `getApollonianData` | Periodic Kleinian inversion (unsigned) | Scale (`1.0`) | — | — | `1.5` | On (Z=0) | `4–24` / `8–32` (`+16` zoom cap) |
+| ID | Fractal | WGSL Function | DE Type | `param1` (`y`) | `param2` (`z`) | `param3` (`w`) | Default Zoom | Slicer Default | Int Steps (`min`–`default`) | `maxInteractiveEpsilon` | Settled Iters (`+zoom cap`) |
+| :-: | :--- | :--- | :--- | :--- | :--- | :--- | :-: | :-: | :-: | :-: | :--- |
+| `0` | **Mandelbulb** | `getMandelbulbData` | Triplex analytic (signed) | Power (`8.0`) | — | — | `1.2` | Off | `64–120` | `0.0015` | `8–14` (`+6` zoom cap) |
+| `1` | **Menger Sponge** | `getMengerSpongeData` | Recursive box fold (signed) | Scale (`3.48`) | — | — | `1.0` | Off | `64–120` | `0.0015` | `8–20` (`+16` zoom cap) |
+| `2` | **Julia Set** | `getJuliaData` | 3D hypercomplex quadratic (signed) | — | C Real (`-0.8`) | C Imag (`0.156`) | `1.2` | On (Z=0) | `48–80` | `0.0015` | `24–96` (`+16` zoom cap) |
+| `3` | **Sierpinski** | `getSierpinskiData` | Tetrahedral KIFS (unsigned) | Scale (`1.75`) | — | — | `1.0` | Off | `40–60` | `0.0018` | `12–28` (`+16` zoom cap) |
+| `4` | **Mandelbox** | `getMandelboxData` | Box + sphere fold (unsigned) | Scale (`2.0`) | Min Radius (`0.135`) | Fixed Radius (`1.0`) | `0.15` | Off | `56–100` | `0.0015` | `24–64` (`+16` zoom cap) |
+| `5` | **Apollonian** | `getApollonianData` | Periodic Kleinian inversion (unsigned) | Scale (`1.0`) | — | — | `1.5` | On (Z=0) | `40–60` | `0.002` | `8–24` (`+16` zoom cap) |
 
 ---
 
-## 4. Adaptive Performance & Demand-Loop Lifecycle
+## 4. 4-Tier Adaptive Performance & Demand-Loop Lifecycle
 
-1. **Interactive Mode (`activeInteracting = isInteracting || isDragging`)**:
+1. **Interactive Mode (`activeInteracting = isInteracting || isDragging`, 30 FPS / `33.3ms` EMA target)**:
    - `settleTimeRef.current = 0`.
-   - `usePerformanceAdaptation` targets **30 FPS (`33.3ms`)** via an asymmetric EMA (window `30` when improving, `~10` when lagging, instant `alpha = 0.9` if `delta > 1.5 * avg && delta > 0.1s`).
-   - Load shedding biases toward `epsilon` (`multiplier^0.65`) over `iterations` (`multiplier^0.35`) so deep-zoom 3D topology stays intact during drags.
-2. **Settling & Progressive Refinement**:
-   - On release, settled quality inherits `interactiveEpsilon` and `interactiveIterations` immediately so there is no spike on the first idle frame.
-   - `settleTimeRef` ramps toward `1.0` (`+delta * 2.5`), smoothly blending interactive and settled shader uniforms while targeting **5 FPS (`200ms`)**.
-   - Meanwhile, `FractalMesh` damps `smoothedZoom`, `smoothedOffset`, and `smoothedRotation` toward targets with `1 - exp(-12 * delta)`.
-3. **Idle Lock (`isSettledQualityLocked`)**:
+   - `usePerformanceAdaptation` tracks frame time via an asymmetric EMA (window `30` when improving, `~10` when lagging, instant `alpha = 0.9` if `delta > 1.5 * avg && delta > 0.1s`, `15%` deadband, `15 Hz` React update throttle).
+   - **Strict 4-Tier Non-Destructive Degradation Priority** (with multiplicative spillover if a tier hits its floor/ceiling):
+     1. **Tier 1 — Dynamic Resolution Scaling (`interactiveResolutionScale` -> `DPR`)**: Bounded by pure helpers `getDprBounds` / `calculateTargetDpr` in `src/utils/dpr.ts` (re-exported by `FractalCanvas.tsx`, kept separate so `App.tsx` imports `getDprBounds` without breaking `App.test.tsx`'s `FractalCanvas` mock). Drops internal DPR first (`1.5x -> 1.25x -> 1.0x` on high-DPI mobile; down to `0.75x` interactive floor on large `>= 750k` CSS-pixel tablet/desktop viewports), quantized to `0.25x` steps to avoid WebGPU swapchain thrashing — giving quadratic $O(\text{DPR}^2)$ savings with zero fractal shape change.
+     2. **Tier 2 — Grazing-Ray Step Cap (`interactiveSteps`)**: Adapts dynamically within `[config.minInteractiveSteps, config.interactiveSteps]` so runaway silhouette grazing rays and deep dark crevices bail early while front-facing surfaces stay crisp.
+     3. **Tier 3 — Pixel-Bounded Surface Threshold (`interactiveEpsilon`)**: `maxInteractiveEpsilon` is tightened to `0.0015–0.002` across `FRACTAL_CONFIGS` (~1.5–2px cone max instead of `0.004–0.008`) so thin tendrils never bloat into "melted clay" blobs.
+     4. **Tier 4 — Emergency Survival Floor (`interactiveIterations`)**: Remains **locked** at `defaultInteractiveIterations` (+ zoom-LOD boost in `App.tsx`) during normal interaction so 3D topology and orbit-trap colors never pop mid-drag; only drops toward `minInteractiveIterations` if Tiers 1–3 are exhausted and FPS is still lagging.
+   - **Exact Reverse-Order Recovery (on fast frames)**: Restores `interactiveIterations -> defaultInteractiveIterations` (never exceeds default automatically) -> `interactiveEpsilon -> defaultInteractiveEpsilon` -> `interactiveSteps -> config.interactiveSteps` -> `interactiveResolutionScale -> 1.0`, and only applies sub-pixel polish (`interactiveEpsilon -> minInteractiveEpsilon`) once Tiers 1 and 2 are back at full defaults.
+2. **Settling & Progressive Refinement (5 FPS / `200ms` EMA target)**:
+   - On input release, `settledEpsilon` and `settledIterations` inherit `interactiveEpsilon` and `interactiveIterations` cleanly and `settledResolutionScale` resets to `1.0` (while `FractalCanvas` triggers the `150ms` settled DPR step-up up to `2.25x` within the `2.2M` pixel budget).
+   - `settleTimeRef` ramps toward `1.0` (`+delta * 2.5`), smoothly blending interactive and settled shader uniforms while `FractalMesh` damps `smoothedZoom`, `smoothedOffset`, and `smoothedRotation` toward targets with `1 - exp(-12 * delta)`.
+   - Fast frames refine `settledEpsilon` and `settledIterations` via symmetric `sqrt(multiplier)`. Under severe settled lag (`multiplier > 2.5`), `usePerformanceAdaptation` sheds `settledResolutionScale` toward `minSettledScale` first before backing off `settledEpsilon` and `settledIterations` down to the interactive floor.
+3. **Idle Lock (`isSettledQualityLocked`) & Telemetry (`DebugPanel.tsx`)**:
    - Once `!activeInteracting`, `settleTime >= 1.0`, `!isActuallyMoving`, and either `onFrameTime(...) === false` (converged / ceiling hit) or `delta >= 0.2s` (5 FPS budget reached), `App.tsx` sets `isSettledQualityLocked = true` and stops calling `invalidate()` — dropping GPU utilization to **0%** until input, resize, or parameter changes occur.
+   - `DebugPanel.tsx` displays live `DPR` (`{values.dpr.toFixed(2)}x`) alongside `FPS`, `Settle`, `Epsilon`, `Iterations`, and `Steps`, and routes `interactiveSteps` / `settledSteps` overrides directly through `usePerformanceAdaptation.overrideKnobs`.
 
 ---
 
 ## 5. Verification Strategy
 
-- **Unit & Integration Tests (`npm test`)**: Runs Vitest 4 under `happy-dom` across 10 suites covering constants, performance adaptation math, R3F canvas resize/device-loss handling, UI controls, ACES wallpaper export, and full app state.
+- **Unit & Integration Tests (`npm test`)**: Runs Vitest 4 under `happy-dom` covering utilities, DPR budgeting (`src/utils/dpr.ts`), constants, 4-tier performance adaptation math, camera interaction physics, R3F canvas resize/adaptive-DPR/device-loss handling, UI controls (`DebugPanel`), ACES wallpaper export, and full app state.
 - **Zero-Drift CPU WGSL Testing (`src/shaders/fractalEngine.test.ts`)**: Extracts live `(renderFractal as any).functionNode.code` directly from Three.js TSL, transpiles WGSL expressions via a Pratt parser (`compileWGSLModule`) onto a JS `Vec`/`mat3x3` math runtime, and executes `get*Data`, `getFractalData`, and `renderFractal` on CPU in ~50 ms.

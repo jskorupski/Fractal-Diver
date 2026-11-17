@@ -16,8 +16,6 @@ interface InteractionProps {
   setFractalViews: React.Dispatch<React.SetStateAction<any>>;
   settleTimeRef: React.MutableRefObject<number>;
   setIsSettledQualityLocked: (locked: boolean) => void;
-  setInteractiveSteps: (steps: number) => void;
-  setSettledSteps: (steps: number) => void;
 }
 
 /**
@@ -39,9 +37,7 @@ export function useFractalInteraction({
   updateCurrentView,
   setFractalViews,
   settleTimeRef,
-  setIsSettledQualityLocked,
-  setInteractiveSteps,
-  setSettledSteps
+  setIsSettledQualityLocked
 }: InteractionProps) {
   const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
   const lastPinchDistRef = useRef<number | null>(null);
@@ -351,6 +347,15 @@ export function useFractalInteraction({
       };
     });
   }, [fractalType, startInteraction, endInteraction, setFractalViews, getZoomDamping]);
+
+  useEffect(() => {
+    return () => {
+      if (wheelTimeoutRef.current) {
+        clearTimeout(wheelTimeoutRef.current);
+        wheelTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   return {
     handleTouchStart,

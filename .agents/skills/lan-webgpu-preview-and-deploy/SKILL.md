@@ -42,7 +42,7 @@ Use the included dual HTTP + self-signed HTTPS script whenever the user asks to 
 ## 3. Hardware & Performance Testing Discipline
 
 - **CPU-First Verification on Older Hosts**: On older/integrated GPUs (e.g., 2018 Intel Macs), prefer fast CPU shader verification (`npm test` + `node .agents/skills/wgsl-fractal-authoring/scripts/probe-raymarch.mjs`) during tight edit loops instead of spinning up heavy headless WebGPU browser instances.
-- **High-DPI Check**: Remember `FractalCanvas.tsx` locks `dpr: 1` for real-time frame rate consistency across Retina laptops, while `takeWallpaperScreenshot` supersamples offscreen up to `3840px`.
+- **High-DPI Check**: Remember [`src/utils/dpr.ts`](../../../src/utils/dpr.ts) (`getDprBounds` / `calculateTargetDpr`, re-exported by [`FractalCanvas.tsx`](../../../src/components/FractalCanvas.tsx)) drives `0.25x`-quantized 4-tier Dynamic Resolution Scaling (`1.5x -> 1.0x` on high-DPI phones, `1.0x -> 0.75x` interactive floor on large `>= 750k` CSS-pixel viewports, and `2.25x` settled on high-DPI mobile), with live `DPR` shown in [`DebugPanel`](../../../src/components/DebugPanel.tsx), while `takeWallpaperScreenshot` supersamples offscreen up to `3840px`.
 
 ---
 

@@ -32,10 +32,16 @@ describe('Fractal Constants', () => {
       expect(config.defaultSettledIterations).toBeGreaterThanOrEqual(config.minSettledIterations);
       expect(config.maxSettledIterations).toBeGreaterThanOrEqual(config.defaultSettledIterations);
       
+      // Adaptive step bounds
+      expect(config.minInteractiveSteps).toBeGreaterThan(0);
+      expect(config.interactiveSteps).toBeGreaterThanOrEqual(config.minInteractiveSteps);
+      expect(config.settledSteps).toBeGreaterThanOrEqual(config.interactiveSteps);
+
       // Epsilon bounds
       expect(config.minInteractiveEpsilon).toBeGreaterThan(0);
       expect(config.defaultInteractiveEpsilon).toBeGreaterThanOrEqual(config.minInteractiveEpsilon);
       expect(config.maxInteractiveEpsilon).toBeGreaterThanOrEqual(config.defaultInteractiveEpsilon);
+      expect(config.maxInteractiveEpsilon).toBeLessThanOrEqual(0.0025);
       expect(config.minSettledEpsilon).toBeGreaterThan(0);
       expect(config.defaultSettledEpsilon).toBeGreaterThanOrEqual(config.minSettledEpsilon);
       expect(config.maxSettledEpsilon).toBeGreaterThanOrEqual(config.defaultSettledEpsilon);
